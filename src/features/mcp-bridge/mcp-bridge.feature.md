@@ -1,10 +1,24 @@
 # Feature — MCP Bridge (read-only)
 
-**Path:** `src/features/mcp-bridge/` · **Module:** 1 (Wave 5) · **Status:** **built & tested** (Phase 8.0)
-**Governs:** blueprint §1 + Layer A (MCP Action Layer). **Packaging target:** the `ece-mcp-bridge` repo.
+**Path:** `src/features/mcp-bridge/` · **Module:** 1 (Wave 5) · **Status:** **built & tested** (Phase 8.0 → 8.1)
+**Governs:** blueprint §1 + Layer A (MCP Action Layer) + `ARCHITECTURE_NOTE_MODEL_TOPOLOGY.md`. **Packaging target:** the `ece-mcp-bridge` repo.
 
 ## Purpose
-The controlled, **read-only** doorway between an MCP client and the factory's system of record. It exposes exactly **one** tool to start — `search_clients` — and every call passes through the full Wave 1–2 guard stack so nothing reaches the data unlogged, unauthorized, or unredacted.
+The **single governed gateway** for all factory capabilities — Claude (operator/backend), the Pulse Agent, the dashboard, and future Autopilot reach every function through this one door (no internal shortcut, no backend bypass, no unregistered access). Phase 8.0 proved the door with one system-of-record tool (`search_clients`); Phase 8.1 generalizes it into a factory-wide tool surface, phased by risk, **starting read-only**. Every call passes the full Wave 1–2 guard stack so nothing reaches data unlogged, unauthorized, or unredacted.
+
+## Phase 8.1 — the 4-class tool taxonomy (structural, built now, enforced now)
+`ToolClass` has exactly four classes; each limit is **unrepresentable to violate** (`tool-classes.ts`):
+- **READ_ONLY** — returns data; the outcome has no write/commit variant.
+- **DRAFT_ONLY** — success is the literal `DRAFT-AWAITING-HUMAN-REVIEW`; no committed/executed/approved variant. Cannot mutate state or write files.
+- **APPROVAL_REQUIRED_WRITE** — execute is reachable only with a single-use, **branded `ConsumedApproval`** that only the taxonomy module can mint, and only after the Approval Gate confirms a held, human-approved action. No token ⇒ `STOP_FOR_APPROVAL`; there is no execute path absent the token.
+- **FORBIDDEN** — never callable; always refused.
+
+**Dispatch-by-class:** `ClassDispatcher.dispatch(class, handlers)` invokes only the handler for the tool's registered class — a lower-privilege class can never reach a higher-privilege path. **Only READ_ONLY is exposed this phase;** the higher tiers are defined, dispatched, and tested (via fixtures) but no draft/write tool is registered or exposed.
+
+## Phase 8.1 — Factory Read Tools (all READ_ONLY)
+15 governance/factory-state tools (`factory-read-tools.ts`), each registered + classified READ_ONLY and sourced from an injected read-only port: `read_factory_status, read_wave_status, read_module_status, read_open_gates, read_review_log, read_evidence_pack, read_open_items, read_domain_registry, read_project_registry, read_feature_registry, read_risk_register, read_product_creation_plan, read_repo_build_plan, read_tool_registry, read_audit_summary`. **No "internal = safe" exemption** — a governance-state read is registered, permissioned, audited (an audited read), and redacted exactly like a system-of-record read. `read_tool_registry` and `read_audit_summary` require the `operator` role (per-tool permissioning — the tool-map and audit trail are real capabilities, not free).
+
+## Phase 8.0 — the first proof tool
 
 ## Placement
 Built in `ece-factory/src/features/mcp-bridge/` alongside every other engine, consistent with the standalone-packaging discipline: it references the guard engines **only via `import type`** and consumes them as injected ports, so it carries zero runtime coupling and lifts cleanly into the `ece-mcp-bridge` packaging repo. Keeping it in-tree here keeps it inside the single accumulated test suite and the type-checked port composition.
