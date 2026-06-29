@@ -37,6 +37,12 @@
 
 **Wave 3 Sourcing & Build CORE complete:** 9 Repo Intelligence · 11 Scoring · 12 Sovereign Readiness · 13 White-Label · 14 Product Spine · 8 Harvest.
 
+## Wave 4 — Registries & Repo Operations CORE
+
+| Feature | Path | Module | Status | Feature file |
+|---------|------|--------|--------|--------------|
+| Domain Registry | `src/features/domain-registry/` | 4 (Wave 4) | **Built & tested** (§4.1 model; deny-by-default validation; append-only PostgreSQL history; standalone) | [domain-registry.feature.md](../src/features/domain-registry/domain-registry.feature.md) |
+
 ## Audit Engine — proven guarantees (9)
 
 Each is proven by a test running against **real PostgreSQL 16.14** (no mocks); the full suite is 25/25 green.
