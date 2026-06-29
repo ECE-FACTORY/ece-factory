@@ -1,9 +1,9 @@
 # Feature — Audit Engine
 
-**Path:** `src/features/audit-engine/` · **Module:** 23 (Wave 1 ROOT) · **Status:** **planned** (no code yet — Phase 2B design)
+**Path:** `src/features/audit-engine/` · **Module:** 23 (Wave 1 ROOT) · **Status:** **core complete (built & tested)** — Phases 3.0–3.5
 **Governs:** blueprint §23; MCP Hardening §§5–6, 23–24. See `docs/ARCHITECTURE.md` and `docs/IMPLEMENTATION_PLAN.md`.
 
-> No feature exists only in code, and this file describes something not yet built — it is explicitly marked **planned** per Layer 2 §9.
+> Core built and tested across Phases 3.0–3.5; 25/25 tests green vs real PostgreSQL 16.14. See `docs/FEATURE_REGISTRY.md` for the per-guarantee test map.
 
 ## Purpose
 Provide the factory's integrity substrate: a tamper-evident, append-only, per-org-scoped, sovereign-resident audit record, written **before** any consequential action fires and attributed to a real human. A call that cannot be attributed and logged does not execute.
@@ -36,7 +36,7 @@ Audit-unavailable at intent-commit → refuse the action before any effect (fail
 T1–T11 in IMPLEMENTATION_PLAN §6 (log-before-execute, fail-closed, intent↔result pairing, no-skip, append-only, chain integrity, audit-of-reads, RLS isolation, redaction-before-write, seam additivity, human attribution). Verbatim runner output required at each phase (Layer 0 §23).
 
 ## Status
-**planned.** Architecture + plan approved-pending-review (Phase 2B). Build starts at Phase 3.0 (toolchain) only after review.
+**Core complete (built & tested), Phases 3.0–3.5.** Nine guarantees proven against real PostgreSQL 16.14 (full suite 25/25): append-only (T5), per-org RLS (T8), hash-chain tamper-evidence (T6), redaction-before-write (T9), write-ahead fail-closed + no-skip (T1/T2/T4), human attribution (T11), orphan reconciliation (T3), audit-of-reads (T7), refusal-audit (refusal suite), plus the external-verifiability `proof()` seam (structural). **Not yet done:** real Permission Engine (Module 22, stubbed via the `Authorizer` seam); MCP exposure (Wave 5); app packaging (Wave 6).
 
 ## Open Items
 - Confirm hash function + canonical serialization format at Phase 3.2.
