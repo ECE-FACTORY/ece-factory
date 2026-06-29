@@ -45,6 +45,7 @@
 | Project Registry | `src/features/project-registry/` | 5 (Wave 4) | **Built & tested** (§5.4 status vocab; deny-by-default + domain-registered check; harvest-before-build gate; append-only PostgreSQL; standalone) | [project-registry.feature.md](../src/features/project-registry/project-registry.feature.md) |
 | Source-of-Truth Doc Engine | `src/features/doc-engine/` | 27 (Wave 4) | **Built & tested** (§5 required docs; no-placeholders; bidirectional code↔docs alignment; deny-by-default; standalone) | [doc-engine.feature.md](../src/features/doc-engine/doc-engine.feature.md) |
 | Feature Registry Engine | `src/features/feature-registry/` | 28 (Wave 4) | **Built & tested** (§8 no-feature-only-in-code; built-without-tests/permissions flagged; deny-by-default; standalone) | [feature-registry.feature.md](../src/features/feature-registry/feature-registry.feature.md) |
+| Repo Builder / Operator | `src/features/repo-builder/` | 29 (Wave 4) | **Built & tested** (§5 governed-repo plan; plans-only/never-executes; harvest-before-build gate inherited; deny-by-default; standalone) | [repo-builder.feature.md](../src/features/repo-builder/repo-builder.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
