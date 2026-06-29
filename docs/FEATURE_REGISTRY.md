@@ -29,6 +29,7 @@
 | Feature | Path | Module | Status | Feature file |
 |---------|------|--------|--------|--------------|
 | Repo Intelligence Engine | `src/features/repo-intelligence/` | 9 (Wave 3) | **Built & tested** (factory memory; repo text inert; deny-by-default eligibility; append-only PostgreSQL) | [repo-intelligence.feature.md](../src/features/repo-intelligence/repo-intelligence.feature.md) |
+| Repository Scoring Engine | `src/features/scoring-engine/` | 11 (Wave 3) | **Built & tested** (§3 rubric /100; License-0 auto-reject; §3.9 70+ flag; deny-by-default pessimistic; standalone) | [scoring-engine.feature.md](../src/features/scoring-engine/scoring-engine.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
