@@ -32,6 +32,7 @@
 | Repository Scoring Engine | `src/features/scoring-engine/` | 11 (Wave 3) | **Built & tested** (§3 rubric /100; License-0 auto-reject; §3.9 70+ flag; deny-by-default pessimistic; standalone) | [scoring-engine.feature.md](../src/features/scoring-engine/scoring-engine.feature.md) |
 | Sovereign Readiness Engine | `src/features/sovereign-readiness/` | 12 (Wave 3) | **Built & tested** (§8 checklist; deny-by-default unknown≠offline; Acceptable/after-hardening/Non-sovereign/Rejected; standalone) | [sovereign-readiness.feature.md](../src/features/sovereign-readiness/sovereign-readiness.feature.md) |
 | White-Label Hardening Engine | `src/features/white-label/` | 13 (Wave 3) | **Built & tested** (§9 taxonomy; must-keep never stripped; deny-by-default unclassified=caution; Ready/after-stripping/Blocked-by-legal) | [white-label.feature.md](../src/features/white-label/white-label.feature.md) |
+| Product Spine Engine | `src/features/product-spine/` | 14 (Wave 3) | **Built & tested** (§4 no-clear-spine⇒Rejected; §5 Anti-Frankenstein downgrade; SPOF; deny-by-default compatibility; standalone) | [product-spine.feature.md](../src/features/product-spine/product-spine.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
