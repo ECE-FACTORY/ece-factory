@@ -18,6 +18,17 @@ The **single governed gateway** for all factory capabilities — Claude (operato
 ## Phase 8.1 — Factory Read Tools (all READ_ONLY)
 15 governance/factory-state tools (`factory-read-tools.ts`), each registered + classified READ_ONLY and sourced from an injected read-only port: `read_factory_status, read_wave_status, read_module_status, read_open_gates, read_review_log, read_evidence_pack, read_open_items, read_domain_registry, read_project_registry, read_feature_registry, read_risk_register, read_product_creation_plan, read_repo_build_plan, read_tool_registry, read_audit_summary`. **No "internal = safe" exemption** — a governance-state read is registered, permissioned, audited (an audited read), and redacted exactly like a system-of-record read. `read_tool_registry` and `read_audit_summary` require the `operator` role (per-tool permissioning — the tool-map and audit trail are real capabilities, not free).
 
+## Phase 8.2 — Draft / Planning Tools (DRAFT_ONLY class)
+7 DRAFT_ONLY tools (`draft-tools.ts`), each registered (registry class `REVIEW_ONLY` → DRAFT_ONLY), dispatched through the DRAFT_ONLY path, each through the full guard stack: `draft_next_prompt, draft_review_decision, draft_wave_report, draft_product_plan, draft_risk_summary, draft_open_items_summary, draft_repo_plan`. They read inputs via injected read-only ports and return a **proposed artifact** — the ceiling of what an autonomous Pulse Layer may produce: proposals, never decisions.
+
+**Structural inertness:**
+- every draft tool's success outcome is the literal `DRAFT-AWAITING-HUMAN-REVIEW` carrying the proposed artifact — `DraftOutcome` has **no** `committed`/`executed`/`approved`/`recorded` variant (type-proven).
+- the draft handler only calls a read-only port and returns data — **no registry write, no fs, no git, no DB write, no network**; the bridge role stays SELECT-only. A draft cannot mutate state, write files, change status, approve a gate, or touch git.
+- a draft is **inert**: `draft_review_decision` records no decision; `draft_repo_plan` creates no repo/build record; `draft_wave_report` signs off no wave (proven by asserting the relevant store/log is unchanged after drafting).
+- **drafting a decision is not making it**: `draft_review_decision` may propose `PASS` as *content*, but the outcome status is `DRAFT-AWAITING-HUMAN-REVIEW`, never `PASS`. The proposed verdict is inert text inside a draft; the outcome carries no authority and records nothing.
+
+Same full guard stack as the read tools (no exemption): the draft production is itself an **audited** event (intent+result) and is **redacted** before return. `draft_review_decision` and `draft_wave_report` are **operator-only** (per-tool permissioning). The exposed surface is now **READ_ONLY + DRAFT_ONLY only** — no `APPROVAL_REQUIRED_WRITE`/external tool is registered or exposed; the write/forbidden paths remain defined-but-unused.
+
 ## Phase 8.0 — the first proof tool
 
 ## Placement

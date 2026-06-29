@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { McpBridge, EXPOSED_TOOLS, type BridgeCallContext, type AuditedSequencerPort } from './mcp-bridge.js';
+import { McpBridge, EXPOSED_READ_TOOLS, type BridgeCallContext, type AuditedSequencerPort } from './mcp-bridge.js';
 import { FACTORY_READ_TOOLS, registerFactoryReadTools, classifyRegisteredTool, type FactoryReadPorts } from './factory-read-tools.js';
 import { createDefaultToolRegistry, InMemoryToolRegistry } from '../tool-registry/tool-registry.js';
 import { PermissionEngine } from '../permission-engine/permission-engine.js';
@@ -70,8 +70,8 @@ describe('Factory read tools — exposed surface is entirely READ_ONLY', () => {
   it('exposes search_clients + 15 factory reads, every one classified READ_ONLY (no write/draft tool)', () => {
     const { bridge, registry } = build();
     const tools = bridge.listTools();
-    expect(tools).toHaveLength(EXPOSED_TOOLS.length);          // 16
-    expect(tools.map((t) => t.name).sort()).toEqual([...EXPOSED_TOOLS].sort());
+    expect(tools).toHaveLength(EXPOSED_READ_TOOLS.length);          // 16 (no draft tools registered here)
+    expect(tools.map((t) => t.name).sort()).toEqual([...EXPOSED_READ_TOOLS].sort());
     for (const t of tools) {
       expect(t.classification).toBe('READ_ONLY');
       expect(t.readOrWrite).toBe('read');

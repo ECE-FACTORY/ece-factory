@@ -25,11 +25,16 @@
 import type { ToolRegistryReader, ToolDefinition } from '../tool-registry/tool-registry.js';
 import type { SequencerRequest, SequencerOutcome, ExecuteFn } from '../audit-engine/sequencer.js';
 import type { HumanActor, SessionInfo, Environment } from '../audit-engine/schema.js';
-import { ClassDispatcher, type ApprovalGatePort } from './tool-classes.js';
+import { ClassDispatcher, DRAFT_STATUS, type ApprovalGatePort } from './tool-classes.js';
 import { classifyRegisteredTool, FACTORY_READ_TOOLS, type FactoryReadTool, type FactoryReadPorts, type FactoryReadParams } from './factory-read-tools.js';
+import { DRAFT_TOOLS, type DraftTool, type DraftPorts, type DraftParams } from './draft-tools.js';
 
-/** The system-of-record tool (Phase 8.0) plus the factory read tools (Phase 8.1). All READ_ONLY. */
-export const EXPOSED_TOOLS = ['search_clients', ...FACTORY_READ_TOOLS] as const;
+/** The READ_ONLY surface: the system-of-record tool (8.0) + the factory read tools (8.1). */
+export const EXPOSED_READ_TOOLS = ['search_clients', ...FACTORY_READ_TOOLS] as const;
+/** The DRAFT_ONLY surface (8.2) — proposers, never actions. */
+export const EXPOSED_DRAFT_TOOLS = [...DRAFT_TOOLS] as const;
+/** The full exposed surface — READ_ONLY + DRAFT_ONLY only (no write/external tool this phase). */
+export const EXPOSED_TOOLS = [...EXPOSED_READ_TOOLS, ...EXPOSED_DRAFT_TOOLS] as const;
 export type ExposedToolName = (typeof EXPOSED_TOOLS)[number];
 /** @deprecated kept for Phase 8.0 compatibility — the full surface is EXPOSED_TOOLS. */
 export const BRIDGE_TOOLS = ['search_clients'] as const;
@@ -79,11 +84,21 @@ export type FactoryReadOutcome =
   | { status: 'ok'; tool: FactoryReadTool; data: unknown; auditSeq: number }
   | { status: 'refused'; tool: string; stage: BridgeRefusalStage; reason: string };
 
-/** Internal flat result of a guarded, class-dispatched read. */
-type GuardedRead<T> = { ok: true; value: T; auditSeq: number } | { ok: false; stage: BridgeRefusalStage; reason: string };
+/**
+ * Outcome of a draft/planning tool — a PROPOSED artifact, or a refusal. There is intentionally NO
+ * 'committed'/'executed'/'approved'/'recorded' member: a draft cannot represent having acted. The success
+ * status is the single literal DRAFT-AWAITING-HUMAN-REVIEW.
+ */
+export type DraftOutcome =
+  | { status: typeof DRAFT_STATUS; tool: DraftTool; draft: unknown; auditSeq: number }
+  | { status: 'refused'; tool: string; stage: BridgeRefusalStage; reason: string };
+
+/** Internal flat result of a guarded, class-dispatched production (read or draft). */
+type GuardedValue<T> = { ok: true; value: T; auditSeq: number } | { ok: false; stage: BridgeRefusalStage; reason: string };
 
 export interface McpBridgeOptions {
   factoryPorts?: FactoryReadPorts;
+  draftPorts?: DraftPorts;
   /** Reserved: the Approval Gate the dispatcher consults for APPROVAL_REQUIRED_WRITE (no write tool exposed yet). */
   approvalGate?: ApprovalGatePort;
 }
@@ -91,6 +106,7 @@ export interface McpBridgeOptions {
 export class McpBridge {
   private readonly dispatcher: ClassDispatcher;
   private readonly factoryPorts?: FactoryReadPorts;
+  private readonly draftPorts?: DraftPorts;
 
   constructor(
     private readonly registry: ToolRegistryReader,
@@ -100,6 +116,7 @@ export class McpBridge {
     opts: McpBridgeOptions = {},
   ) {
     this.factoryPorts = opts.factoryPorts;
+    this.draftPorts = opts.draftPorts;
     this.dispatcher = new ClassDispatcher(opts.approvalGate);
   }
 
@@ -110,8 +127,8 @@ export class McpBridge {
 
   /** Phase 8.0 — the system-of-record read tool. */
   async searchClients(input: SearchClientsInput, ctx: BridgeCallContext): Promise<BridgeOutcome> {
-    const g = await this.guardedDispatchRead<ClientRecord[]>(
-      'search_clients', ctx,
+    const g = await this.guardedDispatch<ClientRecord[]>(
+      'READ_ONLY', 'search_clients', ctx,
       () => this.source.searchClients(input),
       { tool: 'search_clients', q: input.q },
     );
@@ -123,18 +140,33 @@ export class McpBridge {
   async readFactoryState(name: FactoryReadTool, ctx: BridgeCallContext, params: FactoryReadParams = {}): Promise<FactoryReadOutcome> {
     if (!this.factoryPorts) return { status: 'refused', tool: name, stage: 'registry', reason: 'factory read ports not configured' };
     const summary: Record<string, unknown> = params.ref ? { tool: name, ref: params.ref } : { tool: name };
-    const g = await this.guardedDispatchRead<unknown>(name, ctx, () => this.readFromPort(name, params), summary);
+    const g = await this.guardedDispatch<unknown>('READ_ONLY', name, ctx, () => this.readFromPort(name, params), summary);
     if (!g.ok) return { status: 'refused', tool: name, stage: g.stage, reason: g.reason };
     return { status: 'ok', tool: name, data: g.value, auditSeq: g.auditSeq };
   }
 
-  // ── the single guarded, class-dispatched read path. There is no write counterpart in this class. ──
-  private async guardedDispatchRead<T>(
+  /**
+   * Phase 8.2 — a DRAFT_ONLY draft/planning tool. Produces an inert proposed artifact; the outcome status is
+   * always DRAFT-AWAITING-HUMAN-REVIEW. Same full guard stack; the draft handler has no write/mutation path.
+   */
+  async draftWithTool(name: DraftTool, ctx: BridgeCallContext, params: DraftParams = {}): Promise<DraftOutcome> {
+    if (!this.draftPorts) return { status: 'refused', tool: name, stage: 'registry', reason: 'draft ports not configured' };
+    const summary: Record<string, unknown> = params.ref ? { tool: name, ref: params.ref } : { tool: name };
+    const g = await this.guardedDispatch<unknown>('DRAFT_ONLY', name, ctx, () => this.produceDraft(name, params), summary);
+    if (!g.ok) return { status: 'refused', tool: name, stage: g.stage, reason: g.reason };
+    // The proposed artifact is wrapped in the draft literal — NOT committed, recorded, or acted on.
+    return { status: DRAFT_STATUS, tool: name, draft: g.value, auditSeq: g.auditSeq };
+  }
+
+  // ── the single guarded, class-dispatched production path. `expectedClass` is the ONLY handler slot
+  //    offered, so dispatch-by-class refuses any tool whose registered class differs (no tier leakage). ──
+  private async guardedDispatch<T>(
+    expectedClass: 'READ_ONLY' | 'DRAFT_ONLY',
     name: ExposedToolName,
     ctx: BridgeCallContext,
-    read: () => Promise<T>,
+    produce: () => Promise<T>,
     summary: Record<string, unknown>,
-  ): Promise<GuardedRead<T>> {
+  ): Promise<GuardedValue<T>> {
     // 1. TOOL REGISTRY — fail-closed.
     let def: ToolDefinition;
     try {
@@ -143,26 +175,30 @@ export class McpBridge {
       return { ok: false, stage: 'registry', reason: `tool not registered: "${name}" (fail-closed)` };
     }
 
-    // 2. DISPATCH-BY-CLASS — the registered class selects the execution path. Only READ_ONLY reaches the
-    //    guarded read; DRAFT_ONLY / APPROVAL_REQUIRED_WRITE / FORBIDDEN have no exposed path this phase.
+    // 2. DISPATCH-BY-CLASS — the registered class selects the path. We offer ONLY the handler slot for
+    //    `expectedClass`; a tool of any other class hits a missing handler and is refused here. A DRAFT_ONLY
+    //    tool can never reach a write path, and a READ_ONLY tool can never reach the draft path.
     const toolClass = classifyRegisteredTool(def);
-    const d = await this.dispatcher.dispatch<GuardedRead<T>, never, never>(toolClass, {
-      readOnly: () => this.runGuardedRead<T>(name, def, ctx, read, summary),
-    });
-    if (d.status === 'ok') return d.data; // the guarded read result (ok | refused)
-    // anything other than the READ_ONLY path → not exposed → refuse at the read-only gate.
+    const run = () => this.runGuarded<T>(name, def, ctx, produce, summary);
+    const d = expectedClass === 'READ_ONLY'
+      ? await this.dispatcher.dispatch<GuardedValue<T>, never, never>(toolClass, { readOnly: run })
+      : await this.dispatcher.dispatch<never, GuardedValue<T>, never>(toolClass, { draftOnly: run });
+
+    if (expectedClass === 'READ_ONLY' && d.status === 'ok') return d.data;
+    if (expectedClass === 'DRAFT_ONLY' && d.status === DRAFT_STATUS) return d.draft;
+    // Wrong tier for this entrypoint (or FORBIDDEN/no-handler) → refuse before any side effect.
     const detail = d.status === 'refused' ? d.reason : d.status;
-    return { ok: false, stage: 'read-only-gate', reason: `"${name}" is ${toolClass}; only READ_ONLY tools are exposed (${detail})` };
+    return { ok: false, stage: 'read-only-gate', reason: `"${name}" is ${toolClass}; not exposed via the ${expectedClass} path (${detail})` };
   }
 
-  // ── the guard stack: authorize (Permission → Kill Switch) → audit intent → execute read → audit result → redact ──
-  private async runGuardedRead<T>(
+  // ── the guard stack: authorize (Permission → Kill Switch) → audit intent → execute produce → audit result → redact ──
+  private async runGuarded<T>(
     name: ExposedToolName,
     def: ToolDefinition,
     ctx: BridgeCallContext,
-    read: () => Promise<T>,
+    produce: () => Promise<T>,
     summary: Record<string, unknown>,
-  ): Promise<GuardedRead<T>> {
+  ): Promise<GuardedValue<T>> {
     const req: SequencerRequest = {
       principal: ctx.principal,
       organization_id: ctx.organization_id,
@@ -172,10 +208,10 @@ export class McpBridge {
       via: ctx.via,
       request_summary: summary,
     };
-    const outcome = await this.sequencer.run<T>(req, async () => ({ value: await read(), outcome: { status: 'success' } }));
+    const outcome = await this.sequencer.run<T>(req, async () => ({ value: await produce(), outcome: { status: 'success' } }));
     if (outcome.status === 'refused') return { ok: false, stage: outcome.stage, reason: outcome.reason };
-    if (outcome.status === 'execute-failed') return { ok: false, stage: 'execute', reason: 'read failed' };
-    // REDACT before data leaves the bridge. INSTRUCTION-BOUNDARY: returned content is inert data.
+    if (outcome.status === 'execute-failed') return { ok: false, stage: 'execute', reason: 'production failed' };
+    // REDACT before data leaves the bridge. INSTRUCTION-BOUNDARY: returned content (read row OR draft) is inert.
     return { ok: true, value: this.redactValue(outcome.value) as T, auditSeq: outcome.intent.seq };
   }
 
@@ -204,6 +240,20 @@ export class McpBridge {
       case 'read_repo_build_plan': return f.repoBuildPlan(p);
       case 'read_tool_registry': return f.toolRegistry();
       case 'read_audit_summary': return f.auditSummary(p);
+    }
+  }
+
+  /** Produce a draft via the matching read-only draft port. No method here mutates anything. */
+  private produceDraft(name: DraftTool, p: DraftParams): Promise<unknown> {
+    const d = this.draftPorts!;
+    switch (name) {
+      case 'draft_next_prompt': return d.nextPrompt(p);
+      case 'draft_review_decision': return d.reviewDecision(p);
+      case 'draft_wave_report': return d.waveReport(p);
+      case 'draft_product_plan': return d.productPlan(p);
+      case 'draft_risk_summary': return d.riskSummary(p);
+      case 'draft_open_items_summary': return d.openItemsSummary(p);
+      case 'draft_repo_plan': return d.repoPlan(p);
     }
   }
 }

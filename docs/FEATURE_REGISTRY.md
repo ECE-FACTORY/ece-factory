@@ -55,7 +55,7 @@
 
 | Feature | Path | Module | Status | Feature file |
 |---------|------|--------|--------|--------------|
-| MCP Bridge (read-only) | `src/features/mcp-bridge/` | 1 (Wave 5) | **Built & tested** (Phase 8.0→8.1) — single governed gateway; 4-class tool taxonomy (READ_ONLY/DRAFT_ONLY/APPROVAL_REQUIRED_WRITE/FORBIDDEN) structural + dispatch-by-class; 16 READ_ONLY tools exposed (`search_clients` + 15 factory/governance reads) through the full guard stack (no internal exemption; governance reads audited+redacted; per-tool permissioning); READ-ONLY structural incl. SELECT-only DB role; instruction-boundary; standalone | [mcp-bridge.feature.md](../src/features/mcp-bridge/mcp-bridge.feature.md) |
+| MCP Bridge | `src/features/mcp-bridge/` | 1 (Wave 5) | **Built & tested** (Phase 8.0→8.2) — single governed gateway; 4-class taxonomy structural + dispatch-by-class; surface = 16 READ_ONLY (`search_clients` + 15 factory reads) + 7 DRAFT_ONLY (`draft_*` proposers, structurally inert — DRAFT-AWAITING-HUMAN-REVIEW, no committed/recorded variant; drafting a decision ≠ making it); every tool through the full guard stack (no internal exemption; production audited+redacted; per-tool permissioning); no write/external tool exposed; SELECT-only DB role; instruction-boundary; standalone | [mcp-bridge.feature.md](../src/features/mcp-bridge/mcp-bridge.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
