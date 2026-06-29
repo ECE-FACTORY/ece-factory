@@ -2,6 +2,9 @@
 
 > Project-level decisions. Org-level decisions live in `organization-source-of-truth/registry/ORG_DECISION_LOG.md`.
 
+## [2026-06-29] Testing model: fresh-PostgreSQL-per-run is the deliberate standard
+Decision: The integration suite is run against a freshly-provisioned throwaway PostgreSQL cluster on every run (each phase provisions one). This is the deliberate current standard, not an accident — many tests assert exact row counts and are intentionally written against a clean DB. Shared-DB / always-on CI isolation (per-test truncation, transactional rollback, or unique-key fixtures) is deferred to CI/deployment-readiness (~Wave 6). See OPEN_ITEMS #7. Discovered: Phase 7.0.
+
 ## [2026-06-29] Audit Engine spine: PostgreSQL + ECE write-ahead glue + app hash-chain (Module 23)
 Decision: Build the Audit Engine as the approved EXTEND — PostgreSQL as operational append-only audit storage (RLS for per-org scoping, privileges + trigger for append-only), ECE-built write-ahead sequencer (§23.1), app-level hash-chain for tamper evidence (§5), §24 audit-of-reads + permissioned viewer, with optional pgaudit for DB-layer defense-in-depth.
 Reason: Storage was sourceable and is sourced (PostgreSQL, already the stack DB); only the §23–24 governance sequence is genuinely custom. Lowest verification load consistent with the integrity requirements (Layer 1.1 §7). immudb (BSL) and emmett (unverifiable) rejected from live LICENSE reads.
