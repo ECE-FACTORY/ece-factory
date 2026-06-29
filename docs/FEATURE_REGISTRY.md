@@ -47,6 +47,9 @@
 | Feature Registry Engine | `src/features/feature-registry/` | 28 (Wave 4) | **Built & tested** (§8 no-feature-only-in-code; built-without-tests/permissions flagged; deny-by-default; standalone) | [feature-registry.feature.md](../src/features/feature-registry/feature-registry.feature.md) |
 | Repo Builder / Operator | `src/features/repo-builder/` | 29 (Wave 4) | **Built & tested** (§5 governed-repo plan; plans-only/never-executes; harvest-before-build gate inherited; deny-by-default; standalone) | [repo-builder.feature.md](../src/features/repo-builder/repo-builder.feature.md) |
 | Risk Register | `src/features/risk-register/` | 31 (Wave 4) | **Built & tested** (§31 typed register; deny-by-default validation; open-risk surfacer (unmitigated high/critical surfaced as blocking); append-only PostgreSQL; standalone) | [risk-register.feature.md](../src/features/risk-register/risk-register.feature.md) |
+| Product Creation Engine | `src/features/product-creation/` | 6 (Wave 4 — capstone) | **Built & tested** (composes Wave 1–4 via injected ports/types; plans only — single literal PLAN-AWAITING-APPROVAL, type-proven no created/executed/approved state; harvest-before-build + deny-by-default inherited; blocking risks surfaced not buried; standalone) | [product-creation.feature.md](../src/features/product-creation/product-creation.feature.md) |
+
+**Wave 4 Registries & Repo Operations CORE complete:** 4 Domain · 5 Project · 27 Doc · 28 Feature · 29 Repo Builder · 31 Risk Register · 6 Product Creation.
 
 ## Audit Engine — proven guarantees (9)
 
