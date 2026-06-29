@@ -11,6 +11,10 @@
 
 import type { Authorizer, AuthorizationRequest, AuthorizationDecision } from '../audit-engine/sequencer.js';
 import type { ToolRegistryReader, ToolDefinition, RiskClassification } from '../tool-registry/tool-registry.js';
+import type { KillSwitchReader } from '../kill-switch/kill-switch.js';
+
+/** Default reader used when no kill switch is injected: nothing is ever killed. */
+const NEVER_KILLED: KillSwitchReader = { isKilled: () => false, reason: () => null };
 
 /** Classifications that always require human approval (escalate to STOP_FOR_APPROVAL). */
 const APPROVAL_CLASSIFICATIONS: ReadonlySet<RiskClassification> = new Set<RiskClassification>([
@@ -23,16 +27,20 @@ const DEFAULT_ROLE_RANK: Readonly<Record<string, number>> = { user: 1, auditor: 
 
 export interface PermissionEngineOptions {
   roleRank?: Record<string, number>;
+  /** Emergency control. Consulted at the TOP of every decision; a killed scope ⇒ REFUSE. */
+  killSwitch?: KillSwitchReader;
 }
 
 export class PermissionEngine implements Authorizer {
   private readonly roleRank: Record<string, number>;
+  private readonly killSwitch: KillSwitchReader;
 
   constructor(
     private readonly registry: ToolRegistryReader,
     opts?: PermissionEngineOptions,
   ) {
     this.roleRank = opts?.roleRank ?? DEFAULT_ROLE_RANK;
+    this.killSwitch = opts?.killSwitch ?? NEVER_KILLED;
   }
 
   private rank(role: string | undefined): number {
@@ -48,6 +56,12 @@ export class PermissionEngine implements Authorizer {
     const name = req.tool?.name;
     if (!name) return { decision: 'REFUSE', reason: 'missing tool name' };
 
+    // KILL SWITCH — emergency control, checked at the TOP (kill beats role/approval/ALLOW).
+    // Scopes that need no tool metadata (bridge/autopilot/environment/tool/connector) are evaluated
+    // first — before the registry lookup — so an emergency stop disables even unregistered tools.
+    const earlyKill = this.killSwitch.reason({ toolName: name, environment: req.environment, connector: req.connector, autopilot: req.autopilot });
+    if (earlyKill) return { decision: 'REFUSE', reason: `kill switch: ${earlyKill}` };
+
     // Fail-closed lookup: an unregistered tool can never be authorized (no hidden tools).
     let def: ToolDefinition;
     try {
@@ -55,6 +69,10 @@ export class PermissionEngine implements Authorizer {
     } catch {
       return { decision: 'REFUSE', reason: `tool not registered: "${name}" (fail-closed)` };
     }
+
+    // all-writes scope needs readOrWrite — still checked BEFORE any role/approval/ALLOW decision.
+    const writeKill = this.killSwitch.reason({ toolName: name, readOrWrite: def.readOrWrite, environment: req.environment, connector: req.connector, autopilot: req.autopilot });
+    if (writeKill) return { decision: 'REFUSE', reason: `kill switch: ${writeKill}` };
 
     if (def.status === 'disabled') {
       return { decision: 'REFUSE', reason: `tool "${name}" is disabled` };

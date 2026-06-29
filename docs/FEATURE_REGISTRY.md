@@ -8,6 +8,7 @@
 | Redaction Engine | `src/features/redaction-engine/` | 24 (Wave 1 ROOT) | **Built & tested** (deny-by-default, standalone) | [redaction-engine.feature.md](../src/features/redaction-engine/redaction-engine.feature.md) |
 | Tool Registry | `src/features/tool-registry/` | 21 (Wave 1 ROOT) | **Built & tested** (no hidden tools, standalone) | [tool-registry.feature.md](../src/features/tool-registry/tool-registry.feature.md) |
 | Permission Engine | `src/features/permission-engine/` | 22 (Wave 1 ROOT) | **Built & tested** (deny-by-default; ALLOW/REFUSE/STOP_FOR_APPROVAL; replaced allow-all stub) | [permission-engine.feature.md](../src/features/permission-engine/permission-engine.feature.md) |
+| Kill Switch | `src/features/kill-switch/` | 33 (Wave 1 ROOT) | **Built & tested** (6 scopes; immediate runtime effect; kill-beats-all; standalone) | [kill-switch.feature.md](../src/features/kill-switch/kill-switch.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 

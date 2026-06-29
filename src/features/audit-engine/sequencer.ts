@@ -20,6 +20,9 @@ export interface AuthorizationRequest {
   organization_id: string;
   tool: ToolInfo;
   environment: Environment;
+  /** Optional scope hints (e.g. for the Kill Switch): the connector and whether this is an Autopilot run. */
+  connector?: string;
+  autopilot?: boolean;
 }
 export interface AuthorizationDecision {
   decision: 'ALLOW' | 'REFUSE' | 'STOP_FOR_APPROVAL';
@@ -102,6 +105,7 @@ export class WriteAheadSequencer {
       organization_id: req.organization_id,
       tool: req.tool,
       environment: req.environment,
+      connector: req.session.connector_id,
     });
     if (decision.decision !== 'ALLOW') {
       // Record the denied attempt as a distinct refusal entry (never an intent → never an orphan).
