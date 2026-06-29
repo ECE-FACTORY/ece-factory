@@ -13,6 +13,7 @@ import {
   intentContent,
   resultContent,
   readContent,
+  refusalContent,
 } from './schema.js';
 import {
   type AuditSink,
@@ -20,6 +21,7 @@ import {
   type IntentInput,
   type ResultPayload,
   type ReadInput,
+  type RefusalInput,
   type EntryRef,
   type InclusionProof,
   type VerifyResult,
@@ -33,7 +35,7 @@ const J = (v: unknown): string => JSON.stringify(v);
 const Jn = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
 
 interface ChainEntry {
-  kind: 'intent' | 'result' | 'read';
+  kind: 'intent' | 'result' | 'read' | 'refusal';
   seq: number;
   prev_hash: string;
   entry_hash: string;
@@ -75,6 +77,7 @@ export class PostgresHashChainSink implements AuditSink {
          SELECT seq, entry_hash FROM audit_intent   WHERE organization_id = $1
          UNION ALL SELECT seq, entry_hash FROM audit_result   WHERE organization_id = $1
          UNION ALL SELECT seq, entry_hash FROM audit_read_log WHERE organization_id = $1
+         UNION ALL SELECT seq, entry_hash FROM audit_refusal  WHERE organization_id = $1
        ) t ORDER BY seq DESC LIMIT 1`,
       [org],
     );
@@ -137,6 +140,23 @@ export class PostgresHashChainSink implements AuditSink {
     });
   }
 
+  async appendRefusal(input: RefusalInput): Promise<AppendResult> {
+    return this.inOrgTx(input.organization_id, true, async (c) => {
+      const h = await this.head(c, input.organization_id);
+      const seq = (h?.seq ?? 0) + 1;
+      const prev = h?.entry_hash ?? GENESIS_PREV_HASH;
+      const content = refusalContent({ ...input, seq });
+      const entry_hash = this.hashEntry(canonicalSerialize(content), prev);
+      await c.query(
+        `INSERT INTO audit_refusal (seq, organization_id, human_actor, via, session, tool, stage, decision, reason, environment, prev_hash, entry_hash)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [seq, input.organization_id, J(input.human_actor), input.via ?? null, J(input.session), J(input.tool),
+          input.stage, input.decision, input.reason ?? null, input.environment, prev, entry_hash],
+      );
+      return { seq, entry_hash };
+    });
+  }
+
   async verifyChain(organization_id: string): Promise<VerifyResult> {
     const entries = await this.inOrgTx(organization_id, false, async (c) => {
       const intents = await c.query(
@@ -148,11 +168,15 @@ export class PostgresHashChainSink implements AuditSink {
       const reads = await c.query(
         `SELECT seq, organization_id, human_actor, session, query_range, rows_returned, prev_hash, entry_hash
          FROM audit_read_log WHERE organization_id = $1`, [organization_id]);
+      const refusals = await c.query(
+        `SELECT seq, organization_id, human_actor, via, session, tool, stage, decision, reason, environment, prev_hash, entry_hash
+         FROM audit_refusal WHERE organization_id = $1`, [organization_id]);
 
       const all: ChainEntry[] = [];
       for (const r of intents.rows) all.push({ kind: 'intent', seq: Number(r.seq), prev_hash: r.prev_hash, entry_hash: r.entry_hash, content: intentContent(r) });
       for (const r of results.rows) all.push({ kind: 'result', seq: Number(r.seq), prev_hash: r.prev_hash, entry_hash: r.entry_hash, content: resultContent(r) });
       for (const r of reads.rows) all.push({ kind: 'read', seq: Number(r.seq), prev_hash: r.prev_hash, entry_hash: r.entry_hash, content: readContent(r) });
+      for (const r of refusals.rows) all.push({ kind: 'refusal', seq: Number(r.seq), prev_hash: r.prev_hash, entry_hash: r.entry_hash, content: refusalContent(r) });
       all.sort((a, b) => a.seq - b.seq);
       return all;
     });
@@ -179,6 +203,7 @@ export class PostgresHashChainSink implements AuditSink {
            SELECT 'intent'::text AS kind, seq, organization_id, ts, entry_hash FROM audit_intent   WHERE organization_id = $1
            UNION ALL SELECT 'result'::text, seq, organization_id, ts, entry_hash FROM audit_result   WHERE organization_id = $1
            UNION ALL SELECT 'read'::text,   seq, organization_id, ts, entry_hash FROM audit_read_log WHERE organization_id = $1
+           UNION ALL SELECT 'refusal'::text, seq, organization_id, ts, entry_hash FROM audit_refusal WHERE organization_id = $1
          ) t ORDER BY seq LIMIT $2`,
         [organization_id, limit],
       );

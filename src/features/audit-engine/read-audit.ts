@@ -59,8 +59,23 @@ export class AuditViewer {
       environment: req.environment,
     });
     if (decision.decision !== 'ALLOW') {
-      // Refused reads return nothing AND read nothing. They are NOT logged here —
-      // that is the locked Phase 3.5 refusal-audit path (recorded gap, not silent).
+      // Refused reads return nothing AND read nothing — but the denied attempt IS now recorded
+      // as a distinct, chained refusal entry (Phase 3.5). It is never an intent, so it can never
+      // be mistaken for an orphan.
+      try {
+        await this.sink.appendRefusal({
+          organization_id: req.organization_id,
+          human_actor: req.principal,
+          session: req.session,
+          tool: { name: AUDIT_READ_TOOL },
+          stage: 'authorize',
+          decision: decision.decision,
+          reason: decision.reason,
+          environment: req.environment,
+        });
+      } catch {
+        // refusal-audit unavailable; the read is still refused (reads nothing).
+      }
       return { status: 'refused', stage: 'authorize', reason: decision.reason ?? decision.decision };
     }
 

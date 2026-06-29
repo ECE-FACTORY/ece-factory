@@ -76,17 +76,32 @@ export interface OrphanedIntent {
 
 /** Minimal, data-minimized projection of an audit entry returned by the viewer (§14). */
 export interface AuditRow {
-  kind: 'intent' | 'result' | 'read';
+  kind: 'intent' | 'result' | 'read' | 'refusal';
   seq: number;
   organization_id: string;
   ts: string;
   entry_hash: string;
 }
 
+/** A denied attempt — recorded in its OWN table, never as a result-less intent. */
+export interface RefusalInput {
+  organization_id: string;
+  human_actor: HumanActor;
+  via?: string;
+  session: SessionInfo;
+  tool: ToolInfo;
+  stage: string;
+  decision: 'REFUSE' | 'STOP_FOR_APPROVAL';
+  reason?: string;
+  environment: Environment;
+}
+
 export interface AuditSink {
   appendIntent(entry: IntentInput): Promise<AppendResult & { intent_id: string }>;
   appendResult(intentRef: { intent_id: string; organization_id: string }, result: ResultPayload): Promise<AppendResult>;
   appendRead(entry: ReadInput): Promise<AppendResult>;
+  /** Record a denied attempt as a distinct, chained refusal entry (never an intent). */
+  appendRefusal(entry: RefusalInput): Promise<AppendResult>;
   verifyChain(organization_id: string): Promise<VerifyResult>;
   /** Read audit entries for an org (RLS-scoped), data-minimized projection. */
   readEntries(organization_id: string, opts?: { limit?: number }): Promise<AuditRow[]>;

@@ -104,6 +104,23 @@ export class WriteAheadSequencer {
       environment: req.environment,
     });
     if (decision.decision !== 'ALLOW') {
+      // Record the denied attempt as a distinct refusal entry (never an intent → never an orphan).
+      // The action is refused regardless; if refusal-audit itself is unavailable, still refuse.
+      try {
+        await this.sink.appendRefusal({
+          organization_id: req.organization_id,
+          human_actor: req.principal,
+          via: req.via,
+          session: req.session,
+          tool: req.tool,
+          stage: 'authorize',
+          decision: decision.decision,
+          reason: decision.reason,
+          environment: req.environment,
+        });
+      } catch {
+        // refusal-audit unavailable; the action is still denied (fail-closed on the action).
+      }
       return { status: 'refused', stage: 'authorize', reason: decision.reason ?? decision.decision };
     }
 

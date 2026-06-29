@@ -73,7 +73,7 @@ describe('T7 — audit-of-reads (the watchers are watched)', () => {
     expect(b.rows.some((r) => r.organization_id === 'orgA')).toBe(false);
   });
 
-  it('an unpermitted read is refused, returns nothing, and logs nothing (refusal-audit = Phase 3.5)', async () => {
+  it('an unpermitted read is refused, returns nothing, and is recorded as a refusal (Phase 3.5)', async () => {
     const before = await sink.readEntries('orgT7deny');
     expect(before.length).toBe(0);
 
@@ -82,8 +82,9 @@ describe('T7 — audit-of-reads (the watchers are watched)', () => {
     if (out.status === 'refused') expect(out.stage).toBe('authorize');
     expect(out).not.toHaveProperty('rows');
 
-    // Nothing was read AND nothing was logged for the refused attempt (recorded gap, not silent).
+    // Phase 3.5: the denied attempt IS now audited (one refusal entry) — but nothing was read.
     const after = await sink.readEntries('orgT7deny');
-    expect(after.length).toBe(0);
+    expect(after.filter((r) => r.kind === 'refusal').length).toBe(1);
+    expect(after.filter((r) => r.kind === 'read').length).toBe(0);
   });
 });

@@ -167,6 +167,34 @@ export function resultContent(s: ResultContentSource): Record<string, unknown> {
   };
 }
 
+export interface RefusalContentSource {
+  seq: number | string;
+  organization_id: string;
+  human_actor: unknown;
+  via?: unknown;
+  session: unknown;
+  tool: unknown;
+  stage: unknown;
+  decision: unknown;
+  reason?: unknown;
+  environment: unknown;
+}
+export function refusalContent(s: RefusalContentSource): Record<string, unknown> {
+  return {
+    kind: 'refusal',
+    seq: Number(s.seq),
+    organization_id: s.organization_id,
+    human_actor: s.human_actor,
+    via: s.via ?? null,
+    session: s.session,
+    tool: s.tool,
+    stage: s.stage,
+    decision: s.decision,
+    reason: s.reason ?? null,
+    environment: s.environment,
+  };
+}
+
 export interface ReadContentSource {
   seq: number | string;
   organization_id: string;
