@@ -9,6 +9,13 @@ Alternatives Considered: Trillian as spine for cryptographic external-verifiabil
 Impact: Defines the Phase 3 build surface and the custom-code boundary (IMPLEMENTATION_PLAN §5).
 Files Affected: `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_PLAN.md`, `src/features/audit-engine/audit-engine.feature.md`, `docs/UPSTREAM_TRACKING.md`.
 
+## [2026-06-29] Refusal-audit path deferred to Phase 3.5 (denied attempts must be auditable)
+Decision: In the Phase 3.3 sequencer and the Phase 3.4 viewer, authorization runs BEFORE intent/read-log commit, so a REFUSE currently writes no audit record. This is an accepted, temporary gap: a dedicated **refusal-audit path** will be added in **Phase 3.5** so denied attempts are recorded ("who tried what they weren't allowed to, and when") — separately from successful-action audit, to keep intent↔result pairing clean.
+Reason: Auditing refusals is security-relevant (attempted-but-denied access), but folding it into the success path would create result-less "orphan" intents. A distinct refusal record is the correct model.
+Alternatives Considered: Record a refusal as an intent with an immediate error result — rejected (muddies orphan detection and the authz-before-commit ordering).
+Impact: Until Phase 3.5, refused reads/actions return safely and read/do nothing, but are not themselves logged. Tracked in OPEN_ITEMS.md and is the locked next step after 3.4.
+Files Affected: `src/features/audit-engine/sequencer.ts`, `read-audit.ts`; OPEN_ITEMS.md.
+
 ## [2026-06-29] Trillian/Rekor/Tessera reserved behind a defined seam (the `AuditSink` boundary)
 Decision: The high-assurance external-verifiability layer is NOT built now but MUST be additive later. The engine writes only through the `AuditSink` interface (ARCHITECTURE §8); the default is `PostgresHashChainSink`; a future `VerifiableLogSink` (Trillian/Rekor/Tessera, Apache-2.0) attaches as a composed second sink consuming the same canonical entry bytes, returning external proofs via `proof()`.
 Reason: Honor the approval condition that adding external verifiability is additive, not a rewrite. Avoids premature integration weight while preserving the upgrade path for a sovereign client that mandates verifiable audit.

@@ -74,11 +74,22 @@ export interface OrphanedIntent {
   ts: string;
 }
 
+/** Minimal, data-minimized projection of an audit entry returned by the viewer (§14). */
+export interface AuditRow {
+  kind: 'intent' | 'result' | 'read';
+  seq: number;
+  organization_id: string;
+  ts: string;
+  entry_hash: string;
+}
+
 export interface AuditSink {
   appendIntent(entry: IntentInput): Promise<AppendResult & { intent_id: string }>;
   appendResult(intentRef: { intent_id: string; organization_id: string }, result: ResultPayload): Promise<AppendResult>;
   appendRead(entry: ReadInput): Promise<AppendResult>;
   verifyChain(organization_id: string): Promise<VerifyResult>;
+  /** Read audit entries for an org (RLS-scoped), data-minimized projection. */
+  readEntries(organization_id: string, opts?: { limit?: number }): Promise<AuditRow[]>;
   /** Intents with no matching result, older than the grace window (§I3 orphan detection). */
   orphanedIntents(organization_id: string, olderThanSeconds?: number): Promise<OrphanedIntent[]>;
   /** Extension point: null for the Postgres sink; a Merkle proof for a verifiable-log sink. */

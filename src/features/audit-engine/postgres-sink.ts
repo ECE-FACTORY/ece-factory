@@ -24,6 +24,7 @@ import {
   type InclusionProof,
   type VerifyResult,
   type OrphanedIntent,
+  type AuditRow,
   type RedactionPolicy,
   defaultRedactionPolicy,
 } from './sink.js';
@@ -168,6 +169,27 @@ export class PostgresHashChainSink implements AuditSink {
       prevExpected = e.entry_hash;
     }
     return { ok: true, checked };
+  }
+
+  async readEntries(organization_id: string, opts?: { limit?: number }): Promise<AuditRow[]> {
+    const limit = opts?.limit ?? 1000;
+    return this.inOrgTx(organization_id, false, async (c) => {
+      const r = await c.query<{ kind: AuditRow['kind']; seq: string; organization_id: string; ts: Date | string; entry_hash: string }>(
+        `SELECT kind, seq, organization_id, ts, entry_hash FROM (
+           SELECT 'intent'::text AS kind, seq, organization_id, ts, entry_hash FROM audit_intent   WHERE organization_id = $1
+           UNION ALL SELECT 'result'::text, seq, organization_id, ts, entry_hash FROM audit_result   WHERE organization_id = $1
+           UNION ALL SELECT 'read'::text,   seq, organization_id, ts, entry_hash FROM audit_read_log WHERE organization_id = $1
+         ) t ORDER BY seq LIMIT $2`,
+        [organization_id, limit],
+      );
+      return r.rows.map((x) => ({
+        kind: x.kind,
+        seq: Number(x.seq),
+        organization_id: x.organization_id,
+        ts: x.ts instanceof Date ? x.ts.toISOString() : String(x.ts),
+        entry_hash: x.entry_hash,
+      }));
+    });
   }
 
   async orphanedIntents(organization_id: string, olderThanSeconds = 0): Promise<OrphanedIntent[]> {
