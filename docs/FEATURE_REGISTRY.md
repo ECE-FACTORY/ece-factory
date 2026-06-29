@@ -19,6 +19,7 @@
 | Feature | Path | Module | Status | Feature file |
 |---------|------|--------|--------|--------------|
 | Dual-Claude Review Engine | `src/features/review-engine/` | 15 (Wave 2) | **Built & tested** (PASS requires valid machine-true evidence + §22 re-derivation; deny-by-default; standalone) | [review-engine.feature.md](../src/features/review-engine/review-engine.feature.md) |
+| Approval Gate Engine | `src/features/approval-gate/` | 17 (Wave 2) | **Built & tested** (per-action single-use approval; deny-by-default; approver-is-human; standalone) | [approval-gate.feature.md](../src/features/approval-gate/approval-gate.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
