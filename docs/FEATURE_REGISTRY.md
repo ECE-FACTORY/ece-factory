@@ -14,6 +14,12 @@
 
 **Wave 1 ROOTs complete:** 23 Audit · 24 Redaction · 21 Tool Registry · 22 Permission · 33 Kill Switch · 16 Evidence Pack · 10 License & Compliance.
 
+## Wave 2 — Review Spine
+
+| Feature | Path | Module | Status | Feature file |
+|---------|------|--------|--------|--------------|
+| Dual-Claude Review Engine | `src/features/review-engine/` | 15 (Wave 2) | **Built & tested** (PASS requires valid machine-true evidence + §22 re-derivation; deny-by-default; standalone) | [review-engine.feature.md](../src/features/review-engine/review-engine.feature.md) |
+
 ## Audit Engine — proven guarantees (9)
 
 Each is proven by a test running against **real PostgreSQL 16.14** (no mocks); the full suite is 25/25 green.
