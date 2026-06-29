@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { McpBridge, EXPOSED_TOOLS, EXPOSED_WRITE_TOOLS, type BridgeCallContext, type AuditedSequencerPort, type WriteOutcome } from './mcp-bridge.js';
+import { McpBridge, EXPOSED_READ_TOOLS, EXPOSED_DRAFT_TOOLS, EXPOSED_WRITE_TOOLS, type BridgeCallContext, type AuditedSequencerPort, type WriteOutcome } from './mcp-bridge.js';
 import { WRITE_TOOLS, registerWriteTools, type WriteStores, type WriteParams, type WriteRecord } from './write-tools.js';
 import { registerFactoryReadTools, classifyRegisteredTool } from './factory-read-tools.js';
 import { BridgeApprovalGate } from './tool-classes.js';
@@ -200,7 +200,7 @@ describe('Write tools — per-tool permissioning; unregistered; surface', () => 
   it('surface is READ_ONLY + DRAFT_ONLY + APPROVAL_REQUIRED_WRITE(internal) only — no external tool', () => {
     const { bridge, registry } = build();
     const tools = bridge.listTools();
-    expect(tools).toHaveLength(EXPOSED_TOOLS.length); // 16 + 7 + 6 = 29
+    expect(tools).toHaveLength(EXPOSED_READ_TOOLS.length + EXPOSED_DRAFT_TOOLS.length + EXPOSED_WRITE_TOOLS.length); // 16 + 7 + 6 = 29 (no external registered here)
     for (const t of tools) {
       const cls = classifyRegisteredTool(registry.require(t.name));
       expect(['READ_ONLY', 'DRAFT_ONLY', 'APPROVAL_REQUIRED_WRITE']).toContain(cls); // never FORBIDDEN/external

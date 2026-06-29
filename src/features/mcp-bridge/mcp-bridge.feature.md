@@ -41,6 +41,17 @@ Same full guard stack as the read tools (no exemption): the draft production is 
 
 **Fully governed:** registered → dispatch-by-class → Permission (deny-by-default, per-tool; sign-offs admin-only) → **Kill Switch (a killed write ⇒ REFUSE even with a valid token — kill beats approval, token preserved)** → write-ahead audit (**intent before** the mutation, **result after** — the mutation is bracketed) → mutation lands in an append-only store (no silent overwrite) → redaction on returned data → refusal-audit on REFUSE. Outcome `WRITE-COMMITTED` is reachable **only** via the consumed-token path; there is no committed state without a consumed token. The exposed surface is now **READ_ONLY + DRAFT_ONLY + APPROVAL_REQUIRED_WRITE(internal) only** — no external-action tool is registered or exposed.
 
+## Phase 8.4 — External-Action Tools (the hardest gates) + FORBIDDEN tier active
+6 external-action tools (`external-tools.ts`), classified APPROVAL_REQUIRED_WRITE but **flagged external**: `create_github_repo, open_pull_request, create_ticket, update_crm_record, send_email, deploy_package`. The external systems are **injected ports** (tests use fakes that record what would happen — no real side effects). They carry every Phase 8.3 guarantee **plus external-action hardening** (the new core, because the blast radius leaves the factory):
+- **specific target + effect**: the approval binds the exact external target (system + id) and the specific effect; a vague/target-less approval ⇒ refused. The human approves a specific external act, not "external allowed."
+- **before/after intent**: the write-ahead audit records the intended external effect before execution and the outcome after.
+- **no bulk**: one external target per approved action; a bulk/multi-target request ⇒ refused (one approval = one effect).
+- **production gate**: a production/sensitive target requires the approval to name that environment (the binding includes environment, so a dev-scoped approval cannot act on production).
+- **blast-radius in the audit record**: the audit intent names target system, target id, environment, and reversibility.
+- **kill switch + audit untargetable**: an external action whose target references the audit log or kill switch ⇒ refused.
+
+**FORBIDDEN tier active** (`force_delete_repo, rewrite_git_history, mass_delete, disable_audit, disable_kill_switch, bulk_export_pii`) — registered and classified FORBIDDEN, **never callable**: refused before any approval is considered (refused even with a would-be-valid token; no hard-delete / irreversible-destruction path exists). Outcome `EXTERNAL-ACTION-COMMITTED` is reachable **only** via the consumed token + the full hardening gauntlet. The exposed surface is now the **four tiers** (READ_ONLY + DRAFT_ONLY + APPROVAL_REQUIRED_WRITE-internal + APPROVAL_REQUIRED_WRITE-external) with FORBIDDEN defined-and-refused — no tool escapes classification.
+
 ## Phase 8.0 — the first proof tool
 
 ## Placement

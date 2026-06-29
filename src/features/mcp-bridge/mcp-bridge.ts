@@ -25,22 +25,27 @@
 import type { ToolRegistryReader, ToolDefinition } from '../tool-registry/tool-registry.js';
 import type { SequencerRequest, SequencerOutcome, ExecuteFn } from '../audit-engine/sequencer.js';
 import type { HumanActor, SessionInfo, Environment } from '../audit-engine/schema.js';
-import { ClassDispatcher, DRAFT_STATUS, canonicalPayload, type ConsumedApproval, type ApprovalGatePort } from './tool-classes.js';
+import { ClassDispatcher, DRAFT_STATUS, canonicalPayload, type ConsumedApproval, type ApprovalGatePort, type ApprovalBinding } from './tool-classes.js';
 import { classifyRegisteredTool, FACTORY_READ_TOOLS, type FactoryReadTool, type FactoryReadPorts, type FactoryReadParams } from './factory-read-tools.js';
 import { DRAFT_TOOLS, type DraftTool, type DraftPorts, type DraftParams } from './draft-tools.js';
-import { WRITE_TOOLS, type WriteTool, type WriteStores, type WriteParams, type WriteRecord } from './write-tools.js';
-
-/** Internal: a committed write record plus the consumed approval id (proof the write ran under approval). */
-interface WriteRecordResult { record: WriteRecord; approvalId: string }
+import { WRITE_TOOLS, type WriteTool, type WriteStores, type WriteParams } from './write-tools.js';
+import {
+  EXTERNAL_TOOLS, FORBIDDEN_TOOLS, isProductionTarget, targetsProtectedSubsystem,
+  type ExternalTool, type ExternalSystems, type ExternalParams, type ExternalTarget,
+} from './external-tools.js';
 
 /** The READ_ONLY surface: the system-of-record tool (8.0) + the factory read tools (8.1). */
 export const EXPOSED_READ_TOOLS = ['search_clients', ...FACTORY_READ_TOOLS] as const;
 /** The DRAFT_ONLY surface (8.2) — proposers, never actions. */
 export const EXPOSED_DRAFT_TOOLS = [...DRAFT_TOOLS] as const;
-/** The APPROVAL_REQUIRED_WRITE surface (8.3) — internal factory-state mutations, each token-gated. */
+/** The APPROVAL_REQUIRED_WRITE(internal) surface (8.3) — internal factory-state mutations, each token-gated. */
 export const EXPOSED_WRITE_TOOLS = [...WRITE_TOOLS] as const;
-/** The full exposed surface — READ_ONLY + DRAFT_ONLY + APPROVAL_REQUIRED_WRITE(internal) only (no external tool). */
-export const EXPOSED_TOOLS = [...EXPOSED_READ_TOOLS, ...EXPOSED_DRAFT_TOOLS, ...EXPOSED_WRITE_TOOLS] as const;
+/** The APPROVAL_REQUIRED_WRITE(external) surface (8.4) — external actions behind the hardest gates. */
+export const EXPOSED_EXTERNAL_TOOLS = [...EXTERNAL_TOOLS] as const;
+/** The full exposed surface — four tiers. FORBIDDEN tools are registered-and-refused, never exposed/callable. */
+export const EXPOSED_TOOLS = [...EXPOSED_READ_TOOLS, ...EXPOSED_DRAFT_TOOLS, ...EXPOSED_WRITE_TOOLS, ...EXPOSED_EXTERNAL_TOOLS] as const;
+/** The prohibited tier — never callable. */
+export const FORBIDDEN_TOOL_SET: ReadonlySet<string> = new Set(FORBIDDEN_TOOLS);
 export type ExposedToolName = (typeof EXPOSED_TOOLS)[number];
 /** @deprecated kept for Phase 8.0 compatibility — the full surface is EXPOSED_TOOLS. */
 export const BRIDGE_TOOLS = ['search_clients'] as const;
@@ -78,7 +83,7 @@ export interface BridgeCallContext {
   via?: string;
 }
 
-export type BridgeRefusalStage = 'registry' | 'read-only-gate' | 'authorize' | 'validate' | 'intent-commit' | 'execute';
+export type BridgeRefusalStage = 'registry' | 'read-only-gate' | 'authorize' | 'validate' | 'intent-commit' | 'execute' | 'forbidden' | 'hardening';
 
 /** Outcome of a system-of-record read — data, or a refusal. No write variant exists. */
 export type BridgeOutcome =
@@ -110,6 +115,17 @@ export type WriteOutcome =
   | { status: 'STOP_FOR_APPROVAL'; tool: WriteTool; reason: string }
   | { status: 'refused'; tool: string; stage: BridgeRefusalStage; reason: string };
 
+/**
+ * Outcome of an EXTERNAL action. Success is EXTERNAL-ACTION-COMMITTED — reachable ONLY via the consumed
+ * ConsumedApproval token AND the external hardening gauntlet (specific target, no bulk, production gate,
+ * untargetable kill/audit). Missing/non-specific approval ⇒ STOP_FOR_APPROVAL. FORBIDDEN/killed/unauthorized
+ * ⇒ refused. There is no external commit reachable without the full gauntlet.
+ */
+export type ExternalOutcome =
+  | { status: 'EXTERNAL-ACTION-COMMITTED'; tool: ExternalTool; committed: unknown; approvalId: string; target: ExternalTarget; auditSeq: number }
+  | { status: 'STOP_FOR_APPROVAL'; tool: ExternalTool; reason: string }
+  | { status: 'refused'; tool: string; stage: BridgeRefusalStage; reason: string };
+
 /** Internal flat result of a guarded, class-dispatched production (read or draft). */
 type GuardedValue<T> = { ok: true; value: T; auditSeq: number } | { ok: false; stage: BridgeRefusalStage; reason: string };
 
@@ -117,6 +133,7 @@ export interface McpBridgeOptions {
   factoryPorts?: FactoryReadPorts;
   draftPorts?: DraftPorts;
   writeStores?: WriteStores;
+  externalSystems?: ExternalSystems;
   /** The Approval Gate the bridge pre-checks and the dispatcher consumes for APPROVAL_REQUIRED_WRITE. */
   approvalGate?: ApprovalGatePort;
 }
@@ -126,6 +143,7 @@ export class McpBridge {
   private readonly factoryPorts?: FactoryReadPorts;
   private readonly draftPorts?: DraftPorts;
   private readonly writeStores?: WriteStores;
+  private readonly externalSystems?: ExternalSystems;
   private readonly approvalGate?: ApprovalGatePort;
 
   constructor(
@@ -138,6 +156,7 @@ export class McpBridge {
     this.factoryPorts = opts.factoryPorts;
     this.draftPorts = opts.draftPorts;
     this.writeStores = opts.writeStores;
+    this.externalSystems = opts.externalSystems;
     this.approvalGate = opts.approvalGate;
     this.dispatcher = new ClassDispatcher(opts.approvalGate);
   }
@@ -207,20 +226,82 @@ export class McpBridge {
       return { status: 'STOP_FOR_APPROVAL', tool: name, reason: 'no single-use, per-action human approval for this action — write withheld (deny-by-default)' };
     }
     // 4. GUARD STACK + audit-bracketed mutation.
-    const g = await this.runGuardedWrite(name, def, ctx, params, binding);
+    const g = await this.runGuardedApprovedAction(name, def, ctx, params.approvalActionId, binding,
+      { tool: name, target: params.target }, (token) => this.performInternalWrite(name, params, token));
     if (!g.ok) return { status: 'refused', tool: name, stage: g.stage, reason: g.reason };
-    const v = g.value as { committed: unknown; approvalId: string };
-    return { status: 'WRITE-COMMITTED', tool: name, committed: v.committed, approvalId: v.approvalId, auditSeq: g.auditSeq };
+    return { status: 'WRITE-COMMITTED', tool: name, committed: g.value.committed, approvalId: g.value.approvalId, auditSeq: g.auditSeq };
   }
 
-  // ── the guarded write: authorize (Permission → Kill Switch; kill beats approval) → audit intent → consume
-  //    the single-use token + mutate inside the committed callback → audit result → redact. ──
-  private async runGuardedWrite(
-    name: WriteTool,
+  /**
+   * Phase 8.4 — an EXTERNAL action (acts on a system OUTSIDE the factory). Every Phase 8.3 guarantee PLUS
+   * external hardening: the approval must bind the EXACT target + effect; no bulk; production gate; the kill
+   * switch and audit are untargetable; blast-radius (system/id/env/reversibility) recorded in the audit intent.
+   * A FORBIDDEN tool is refused before any approval. Commits ONLY via the consumed-token + hardening gauntlet.
+   */
+  async externalActionWithTool(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    if (!this.externalSystems) return { status: 'refused', tool: name, stage: 'registry', reason: 'external systems not configured' };
+    // 1. TOOL REGISTRY — fail-closed.
+    let def: ToolDefinition;
+    try {
+      def = this.registry.require(name);
+    } catch {
+      return { status: 'refused', tool: name, stage: 'registry', reason: `tool not registered: "${name}" (fail-closed)` };
+    }
+    // 2. FORBIDDEN tier — never callable; refused BEFORE any approval is even considered.
+    const toolClass = classifyRegisteredTool(def);
+    if (FORBIDDEN_TOOL_SET.has(name) || toolClass === 'FORBIDDEN') {
+      return { status: 'refused', tool: name, stage: 'forbidden', reason: `"${name}" is FORBIDDEN — never callable (no token, no human, nothing unlocks it)` };
+    }
+    if (toolClass !== 'APPROVAL_REQUIRED_WRITE') {
+      return { status: 'refused', tool: name, stage: 'read-only-gate', reason: `"${name}" is ${toolClass}; not an approval-gated external action` };
+    }
+    // 3. EXTERNAL HARDENING (deny-by-default, before approval) —
+    //    (a) the kill switch and audit can NEVER be the target of an external action.
+    if (targetsProtectedSubsystem(params.target)) {
+      return { status: 'refused', tool: name, stage: 'forbidden', reason: 'the kill switch and audit log can never be the target of an external action' };
+    }
+    //    (b) no bulk — exactly one target per approved action.
+    if (params.targets && params.targets.length !== 1) {
+      return { status: 'refused', tool: name, stage: 'hardening', reason: 'bulk/multi-target external action refused — one approval authorizes one external effect' };
+    }
+    const target = params.target ?? (params.targets && params.targets.length === 1 ? params.targets[0] : undefined);
+    //    (c) the approval must name a SPECIFIC target + effect — vague/target-less ⇒ refused.
+    if (!target || !target.system?.trim() || !target.targetId?.trim() || !target.effect?.trim()) {
+      return { status: 'refused', tool: name, stage: 'hardening', reason: 'external action refused — a specific target (system + id) and effect are required (deny-by-default)' };
+    }
+    // 4. Per-action binding includes the exact external target + effect + environment, so an approval for one
+    //    target/effect/env cannot authorize a different one. Production targets thus require a production-scoped approval.
+    const binding: ApprovalBinding = {
+      tool: name,
+      target: target.targetId,
+      payloadJson: canonicalPayload({ system: target.system, effect: target.effect, environment: target.environment ?? null, payload: params.payload ?? null }),
+    };
+    // 5. APPROVAL PRE-CHECK (non-consuming): no specific-target human approval ⇒ STOP, external port NEVER called.
+    if (!this.approvalGate || !params.approvalActionId || !this.approvalGate.isApprovedForAction(params.approvalActionId, binding)) {
+      const extra = isProductionTarget(target) ? ' (a production target requires an approval explicitly scoped to production)' : '';
+      return { status: 'STOP_FOR_APPROVAL', tool: name, reason: `no single-use, specific-target human approval for this external action — withheld${extra}` };
+    }
+    // 6. GUARD STACK + audit-bracketed external action. The audit intent records the BLAST RADIUS.
+    const summary: Record<string, unknown> = {
+      tool: name, system: target.system, target_id: target.targetId,
+      environment: target.environment ?? ctx.environment, reversibility: target.reversible, effect: target.effect,
+    };
+    const g = await this.runGuardedApprovedAction(name, def, ctx, params.approvalActionId, binding, summary,
+      (token) => this.performExternal(name, target, params.payload, token));
+    if (!g.ok) return { status: 'refused', tool: name, stage: g.stage, reason: g.reason };
+    return { status: 'EXTERNAL-ACTION-COMMITTED', tool: name, committed: g.value.committed, approvalId: g.value.approvalId, target, auditSeq: g.auditSeq };
+  }
+
+  // ── the shared guarded approved action: authorize (Permission → Kill Switch; kill beats approval) → audit
+  //    intent → consume the single-use token + perform inside the committed callback → audit result → redact. ──
+  private async runGuardedApprovedAction(
+    name: WriteTool | ExternalTool,
     def: ToolDefinition,
     ctx: BridgeCallContext,
-    params: WriteParams,
-    binding: { tool: string; target?: string; payloadJson?: string },
+    actionId: string | undefined,
+    binding: ApprovalBinding,
+    summary: Record<string, unknown>,
+    perform: (token: ConsumedApproval) => Promise<unknown>,
   ): Promise<GuardedValue<{ committed: unknown; approvalId: string }>> {
     const req: SequencerRequest = {
       principal: ctx.principal,
@@ -229,38 +310,46 @@ export class McpBridge {
       tool: { name, classification: def.classification, permission_level: def.permissionLevel },
       environment: ctx.environment,
       via: ctx.via,
-      request_summary: { tool: name, target: params.target },
+      request_summary: summary, // BLAST RADIUS for external actions (system/target_id/environment/reversibility)
     };
     const outcome = await this.sequencer.run<{ committed: unknown; approvalId: string }>(req, async () => {
       // authorize (Permission + Kill) has passed; the intent is durable. NOW consume the per-action token —
-      // the mutation is UNREACHABLE without the ConsumedApproval the dispatcher mints here.
-      const d = await this.dispatcher.dispatch<never, never, WriteRecordResult>('APPROVAL_REQUIRED_WRITE', {
-        approvalWrite: (token: ConsumedApproval) => this.mutate(name, params, token),
-      }, { tool: name, approvalActionId: params.approvalActionId, approvalBinding: binding });
-      if (d.status !== 'executed') {
-        // token vanished between pre-check and consume (e.g. concurrent replay) → do NOT mutate.
-        throw new Error(`approval consumption failed: ${d.status}`);
-      }
+      // the action is UNREACHABLE without the ConsumedApproval the dispatcher mints here.
+      const d = await this.dispatcher.dispatch<never, never, { record: unknown; approvalId: string }>('APPROVAL_REQUIRED_WRITE', {
+        approvalWrite: (token: ConsumedApproval) => perform(token).then((record) => ({ record, approvalId: token.approvalId })),
+      }, { tool: name, approvalActionId: actionId, approvalBinding: binding });
+      if (d.status !== 'executed') throw new Error(`approval consumption failed: ${d.status}`); // do NOT act
       return { value: { committed: d.result.record, approvalId: d.result.approvalId }, outcome: { status: 'success' } };
     });
     if (outcome.status === 'refused') return { ok: false, stage: outcome.stage, reason: outcome.reason }; // authorize/kill
-    if (outcome.status === 'execute-failed') return { ok: false, stage: 'execute', reason: 'write withheld — approval not consumable' };
+    if (outcome.status === 'execute-failed') return { ok: false, stage: 'execute', reason: 'action withheld — approval not consumable' };
     return { ok: true, value: { committed: this.redactValue(outcome.value.committed), approvalId: outcome.value.approvalId }, auditSeq: outcome.intent.seq };
   }
 
-  /** Route the mutation to the matching append-only write store. The token proves a consumed human approval. */
-  private async mutate(name: WriteTool, params: WriteParams, token: ConsumedApproval): Promise<WriteRecordResult> {
+  /** Route to the matching append-only write store. The token proves a consumed human approval. */
+  private performInternalWrite(name: WriteTool, params: WriteParams, _token: ConsumedApproval): Promise<unknown> {
     const s = this.writeStores!;
-    let record: WriteRecord;
     switch (name) {
-      case 'record_review_decision': record = await s.recordReviewDecision(params); break;
-      case 'record_human_signoff': record = await s.recordHumanSignoff(params); break;
-      case 'create_open_item': record = await s.createOpenItem(params); break;
-      case 'record_approval_gate': record = await s.recordApprovalGate(params); break;
-      case 'update_risk_status': record = await s.updateRiskStatus(params); break;
-      case 'record_wave_signoff': record = await s.recordWaveSignoff(params); break;
+      case 'record_review_decision': return s.recordReviewDecision(params);
+      case 'record_human_signoff': return s.recordHumanSignoff(params);
+      case 'create_open_item': return s.createOpenItem(params);
+      case 'record_approval_gate': return s.recordApprovalGate(params);
+      case 'update_risk_status': return s.updateRiskStatus(params);
+      case 'record_wave_signoff': return s.recordWaveSignoff(params);
     }
-    return { record, approvalId: token.approvalId };
+  }
+
+  /** Route to the matching external system (one target). The token proves a consumed, specific-target approval. */
+  private performExternal(name: ExternalTool, target: ExternalTarget, payload: Record<string, unknown> | undefined, _token: ConsumedApproval): Promise<unknown> {
+    const x = this.externalSystems!;
+    switch (name) {
+      case 'create_github_repo': return x.createGithubRepo(target, payload);
+      case 'open_pull_request': return x.openPullRequest(target, payload);
+      case 'create_ticket': return x.createTicket(target, payload);
+      case 'update_crm_record': return x.updateCrmRecord(target, payload);
+      case 'send_email': return x.sendEmail(target, payload);
+      case 'deploy_package': return x.deployPackage(target, payload);
+    }
   }
 
   // ── the single guarded, class-dispatched production path. `expectedClass` is the ONLY handler slot

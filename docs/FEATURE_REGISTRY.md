@@ -55,7 +55,7 @@
 
 | Feature | Path | Module | Status | Feature file |
 |---------|------|--------|--------|--------------|
-| MCP Bridge | `src/features/mcp-bridge/` | 1 (Wave 5) | **Built & tested** (Phase 8.0→8.3) — single governed gateway; 4-class taxonomy structural + dispatch-by-class; surface = 16 READ_ONLY + 7 DRAFT_ONLY (inert proposers) + 6 APPROVAL_REQUIRED_WRITE (internal-state mutations, each gated by a single-use, per-action, human-approved, unforgeable ConsumedApproval token; kill beats approval; append-only + audit-bracketed; WRITE-COMMITTED only via consumed token); no external/git/email/deploy tool exposed; every tool through the full guard stack (no internal exemption; per-tool permissioning); SELECT-only DB role for reads; instruction-boundary; standalone | [mcp-bridge.feature.md](../src/features/mcp-bridge/mcp-bridge.feature.md) |
+| MCP Bridge | `src/features/mcp-bridge/` | 1 (Wave 5) | **Built & tested** (Phase 8.0→8.4) — single governed gateway; 4-class taxonomy structural + dispatch-by-class; surface = 4 tiers (16 READ_ONLY + 7 DRAFT_ONLY + 6 APPROVAL_REQUIRED_WRITE-internal + 6 APPROVAL_REQUIRED_WRITE-external) with FORBIDDEN (6) registered-and-refused. External tools behind the hardest gates: specific-target+effect human approval, no bulk, production gate, blast-radius audited, kill/audit untargetable, EXTERNAL-ACTION-COMMITTED only via consumed token + hardening; FORBIDDEN never callable (refused even with a token); no real side effects (injected ports). Every tool full guard stack; per-tool permissioning; standalone | [mcp-bridge.feature.md](../src/features/mcp-bridge/mcp-bridge.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
