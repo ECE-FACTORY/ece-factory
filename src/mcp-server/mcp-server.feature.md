@@ -11,10 +11,11 @@ A runnable MCP server that connects Claude Code (and any MCP client) to the prov
 - **`server-core.ts`** — `McpServerCore`: a **pure transport adapter**. It lists the classified surface and routes each call to the correct bridge method **by class**. It adds **NO guard logic** — every call flows through the bridge's proven Registry → dispatch-by-class → Permission → Kill Switch → write-ahead Audit → Redaction stack. The core decides which method, never whether.
 - **`live-read-adapters.ts`** — `LiveFactoryReadPorts`: read-only adapters over **live** sources (real risk/domain/project stores, the real audit sink, the real tool registry, real governance docs). No write path.
 
-## What's live vs fake (this phase)
-- **LIVE:** the READ_ONLY tier — `search_clients` + the 15 factory/governance reads point at real stores. Each live read still flows the **full guard stack** (registered, permissioned, audited, redacted; governance reads audited+redacted+permissioned — no internal exemption).
-- **FAKE:** the DRAFT/internal-write/external tiers remain on injected fakes — driving them still STOPs/refuses exactly as proven (no live write, no live external action).
-- **DB role:** the server connects as a **SELECT-only** role on the system of record — structurally cannot write it, even though write tools exist (on fakes).
+## What's live vs fake (current)
+- **LIVE — READ_ONLY (Phase 9.0):** `search_clients` + the 15 factory/governance reads point at real stores; each flows the full guard stack (registered, permissioned, audited, redacted).
+- **LIVE — internal-write (Phase 9.1):** the 6 internal-write tools land in **real append-only stores** (`review_log_entries`, `open_items`, `risk_register`) via `LiveWriteStores` behind the existing `WriteStores` ports. **The Phase 8.3 token gate is unchanged** — a live write executes only with a single-use, per-action-bound, human-approved, unforgeable `ConsumedApproval`; no token ⇒ STOP, nothing written. No new guard logic; the adapters are thin INSERT-only stores.
+- **FAKE:** the DRAFT + external tiers remain on injected fakes (no live external action); FORBIDDEN registered-and-refused.
+- **DB roles (minimally scoped):** the READ_ONLY tier uses `ece_app` (SELECT-only on the system of record — unchanged). The internal-write tier uses `ece_writer` with **INSERT (+SELECT) on exactly the 3 target tables and nothing else** — no UPDATE/DELETE/TRUNCATE (append-only at the privilege layer too), no access to `clients` or any external system. Append-only is also enforced by guard triggers (migration 0008). The audit role writes audit; `ece_writer` never touches it.
 
 ## Tests
 - `server-core.test.ts` (pure): exposes exactly the 35 classified tools (4 tiers, no FORBIDDEN/unknown); routes by class to the right bridge method; write/external STOP on fakes; FORBIDDEN/unregistered refused.

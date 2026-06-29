@@ -17,11 +17,12 @@ const { Pool } = pkg;
 
 import { McpServerCore, type McpServerBridge } from './server-core.js';
 import { LiveFactoryReadPorts, type LiveReadSources } from './live-read-adapters.js';
+import { LiveWriteStores } from './live-write-adapters.js';
 import { McpBridge } from '../features/mcp-bridge/mcp-bridge.js';
 import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
 import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-tools.js';
 import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draft-tools.js';
-import { registerWriteTools, type WriteStores, type WriteRecord } from '../features/mcp-bridge/write-tools.js';
+import { registerWriteTools } from '../features/mcp-bridge/write-tools.js';
 import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../features/mcp-bridge/external-tools.js';
 import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
 import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
@@ -43,10 +44,6 @@ export const PROTOCOL_VERSION = '2024-11-05';
 function fakeDraftPorts(): DraftPorts {
   const draft = async (): Promise<unknown> => ({ note: 'draft (server: drafts wired to fakes this phase)' });
   return { nextPrompt: draft, reviewDecision: draft, waveReport: draft, productPlan: draft, riskSummary: draft, openItemsSummary: draft, repoPlan: draft };
-}
-function fakeWriteStores(): WriteStores {
-  const w = async (): Promise<WriteRecord> => { throw new Error('write stores are fakes this phase — no live internal write'); };
-  return { recordReviewDecision: w, recordHumanSignoff: w, createOpenItem: w, recordApprovalGate: w, updateRiskStatus: w, recordWaveSignoff: w };
 }
 function fakeExternalSystems(): ExternalSystems {
   const x = async (): Promise<never> => { throw new Error('external systems are fakes this phase — no live external action'); };
@@ -78,7 +75,7 @@ function docReaderFrom(repoRoot: string): (doc: string) => Promise<unknown> {
 }
 
 export interface ServerEnv {
-  pgHost: string; pgPort: number; pgDatabase: string; pgUser: string;
+  pgHost: string; pgPort: number; pgDatabase: string; pgUser: string; pgWriteUser: string;
   principal: { user_id: string; email: string; role: string };
   organizationId: string;
   environment: 'local' | 'staging' | 'production';
@@ -94,7 +91,8 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
     pgHost: env.PGHOST ?? '127.0.0.1',
     pgPort: Number(env.PGPORT ?? 5432),
     pgDatabase: env.PGDATABASE ?? 'ece_audit',
-    pgUser: env.ECE_DB_USER ?? 'ece_app', // SELECT-only role on the system of record
+    pgUser: env.ECE_DB_USER ?? 'ece_app', // SELECT-only role on the system of record (READ_ONLY tier)
+    pgWriteUser: env.ECE_WRITE_DB_USER ?? 'ece_writer', // INSERT-append-only role on the internal-write targets
     principal: { user_id, email: env.ECE_PRINCIPAL_EMAIL ?? '', role: env.ECE_PRINCIPAL_ROLE ?? 'operator' },
     organizationId: env.ECE_ORG ?? 'org_default',
     environment: (env.ECE_ENV as ServerEnv['environment']) ?? 'local',
@@ -103,8 +101,9 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
 }
 
 /** Build the bridge (live reads + fake writes/externals) and the server core. No stdin involved — testable. */
-export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool> } {
-  const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });
+export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool> } {
+  const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });          // READ_ONLY tier + audit
+  const writePool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgWriteUser }); // internal-write tier (append-INSERT only)
 
   const registry = createDefaultToolRegistry();
   registerFactoryReadTools(registry); registerDraftTools(registry); registerWriteTools(registry); registerExternalTools(registry); registerForbiddenTools(registry);
@@ -130,7 +129,8 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
     registry, sequencer, new PostgresClientReadModel(pool), redactor,
     {
       factoryPorts: new LiveFactoryReadPorts(liveSources), // LIVE reads
-      draftPorts: fakeDraftPorts(), writeStores: fakeWriteStores(), externalSystems: fakeExternalSystems(), // fakes
+      writeStores: new LiveWriteStores(writePool),         // LIVE internal-write (append-only; token-gated by the bridge)
+      draftPorts: fakeDraftPorts(), externalSystems: fakeExternalSystems(), // drafts + external stay on fakes
       approvalGate: new BridgeApprovalGate(new ApprovalGate(), cfg.principal.user_id),
     },
   );
@@ -140,7 +140,7 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
     session: { session_id: `mcp-${cfg.principal.user_id}`, connector_type: 'mcp', source_application: 'claude-code' },
     environment: cfg.environment, via: 'claude-code',
   };
-  return { core, ctx, pool };
+  return { core, ctx, pool, writePool };
 }
 
 // ── JSON-RPC 2.0 over stdio (the MCP transport subset Claude Code uses) ──
@@ -169,7 +169,7 @@ export async function main(): Promise<void> {
   const cfg = envConfig(process.env, repoRoot);
   const { core, ctx } = buildServer(cfg);
   const rl = createInterface({ input: process.stdin });
-  process.stderr.write(`[ece-factory mcp] up — ${core.listTools().length} tools, READ_ONLY live; writes/externals on fakes\n`);
+  process.stderr.write(`[ece-factory mcp] up — ${core.listTools().length} tools, READ_ONLY + internal-write live (append-only, token-gated); externals on fakes\n`);
   for await (const line of rl) {
     const trimmed = line.trim();
     if (!trimmed) continue;
