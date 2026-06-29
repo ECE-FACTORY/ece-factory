@@ -33,6 +33,9 @@
 | Sovereign Readiness Engine | `src/features/sovereign-readiness/` | 12 (Wave 3) | **Built & tested** (§8 checklist; deny-by-default unknown≠offline; Acceptable/after-hardening/Non-sovereign/Rejected; standalone) | [sovereign-readiness.feature.md](../src/features/sovereign-readiness/sovereign-readiness.feature.md) |
 | White-Label Hardening Engine | `src/features/white-label/` | 13 (Wave 3) | **Built & tested** (§9 taxonomy; must-keep never stripped; deny-by-default unclassified=caution; Ready/after-stripping/Blocked-by-legal) | [white-label.feature.md](../src/features/white-label/white-label.feature.md) |
 | Product Spine Engine | `src/features/product-spine/` | 14 (Wave 3) | **Built & tested** (§4 no-clear-spine⇒Rejected; §5 Anti-Frankenstein downgrade; SPOF; deny-by-default compatibility; standalone) | [product-spine.feature.md](../src/features/product-spine/product-spine.feature.md) |
+| Harvest Engine | `src/features/harvest-engine/` | 8 (Wave 3) | **Built & tested** (orchestrates 9/11/12/13/14; §3.8 two-pass escalation; always ends STOP, never self-approves; deny-by-default surfacing; standalone) | [harvest-engine.feature.md](../src/features/harvest-engine/harvest-engine.feature.md) |
+
+**Wave 3 Sourcing & Build CORE complete:** 9 Repo Intelligence · 11 Scoring · 12 Sovereign Readiness · 13 White-Label · 14 Product Spine · 8 Harvest.
 
 ## Audit Engine — proven guarantees (9)
 
