@@ -51,6 +51,12 @@
 
 **Wave 4 Registries & Repo Operations CORE complete:** 4 Domain · 5 Project · 27 Doc · 28 Feature · 29 Repo Builder · 31 Risk Register · 6 Product Creation.
 
+## Wave 5 — Bridge & Action Layer
+
+| Feature | Path | Module | Status | Feature file |
+|---------|------|--------|--------|--------------|
+| MCP Bridge (read-only) | `src/features/mcp-bridge/` | 1 (Wave 5) | **Built & tested** (read-only doorway; one tool `search_clients`; full Wave 1–2 guard stack via injected ports — Tool Registry fail-closed → READ-ONLY gate → Permission deny-by-default → Kill Switch beats-all → write-ahead audit intent+result → Redaction; READ-ONLY structural incl. SELECT-only DB role; instruction-boundary; standalone) | [mcp-bridge.feature.md](../src/features/mcp-bridge/mcp-bridge.feature.md) |
+
 ## Audit Engine — proven guarantees (9)
 
 Each is proven by a test running against **real PostgreSQL 16.14** (no mocks); the full suite is 25/25 green.
