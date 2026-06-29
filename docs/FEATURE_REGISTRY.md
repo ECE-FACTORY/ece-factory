@@ -7,6 +7,7 @@
 | Audit Engine | `src/features/audit-engine/` | 23 (Wave 1 ROOT) | **Core complete (built & tested)** | [audit-engine.feature.md](../src/features/audit-engine/audit-engine.feature.md) |
 | Redaction Engine | `src/features/redaction-engine/` | 24 (Wave 1 ROOT) | **Built & tested** (deny-by-default, standalone) | [redaction-engine.feature.md](../src/features/redaction-engine/redaction-engine.feature.md) |
 | Tool Registry | `src/features/tool-registry/` | 21 (Wave 1 ROOT) | **Built & tested** (no hidden tools, standalone) | [tool-registry.feature.md](../src/features/tool-registry/tool-registry.feature.md) |
+| Permission Engine | `src/features/permission-engine/` | 22 (Wave 1 ROOT) | **Built & tested** (deny-by-default; ALLOW/REFUSE/STOP_FOR_APPROVAL; replaced allow-all stub) | [permission-engine.feature.md](../src/features/permission-engine/permission-engine.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
