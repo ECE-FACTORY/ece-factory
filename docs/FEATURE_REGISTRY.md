@@ -20,6 +20,9 @@
 |---------|------|--------|--------|--------------|
 | Dual-Claude Review Engine | `src/features/review-engine/` | 15 (Wave 2) | **Built & tested** (PASS requires valid machine-true evidence + §22 re-derivation; deny-by-default; standalone) | [review-engine.feature.md](../src/features/review-engine/review-engine.feature.md) |
 | Approval Gate Engine | `src/features/approval-gate/` | 17 (Wave 2) | **Built & tested** (per-action single-use approval; deny-by-default; approver-is-human; standalone) | [approval-gate.feature.md](../src/features/approval-gate/approval-gate.feature.md) |
+| Compliance Checker | `src/features/compliance-checker/` | 26 (Wave 2) | **Built & tested** (11 governance invariants; deny-by-default; Compliant/Warning/Fail/STOP; standalone) | [compliance-checker.feature.md](../src/features/compliance-checker/compliance-checker.feature.md) |
+
+**Wave 2 Review Spine complete:** 15 Dual-Claude Review · 17 Approval Gate · 26 Compliance Checker.
 
 ## Audit Engine — proven guarantees (9)
 
