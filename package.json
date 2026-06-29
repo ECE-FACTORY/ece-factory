@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "mcp:server": "node src/mcp-server/run.mjs"
   },
   "license": "SEE LICENSE — governed by organization-source-of-truth",
   "devDependencies": {
