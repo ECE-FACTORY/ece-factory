@@ -112,35 +112,11 @@ export interface AuditSink {
 }
 
 // ---------------------------------------------------------------------------
-// Redaction-before-write boundary (Action-Layer §E / ARCHITECTURE §3).
-// This is the SEAM for Module 24 (Redaction Engine). The default below is a
-// deny-by-default sensitive-KEY stripper applied to free-form payload summaries
-// BEFORE hashing/writing, so sensitive data never enters an audit row in the clear.
-// Module 24 will replace this with the full server-side, allowlist-based redactor.
+// Redaction-before-write SEAM (Action-Layer §E / ARCHITECTURE §3).
+// The audit sink defines this port; the concrete implementation (Module 24,
+// the Redaction Engine — deny-by-default, allowlist-based) is INJECTED. The sink
+// never imports a concrete redactor, keeping the engines independently packageable.
 // ---------------------------------------------------------------------------
 export interface RedactionPolicy {
   redactSummary(summary: Record<string, unknown> | undefined): Record<string, unknown> | undefined;
 }
-
-const SENSITIVE_KEY = /(password|passwd|secret|token|api[_-]?key|credential|national[_-]?id|passport|ssn|iban|card|cvv|private[_-]?note|financial|salary|contract)/i;
-
-function stripSensitive(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripSensitive);
-  if (value && typeof value === 'object') {
-    const src = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(src)) {
-      if (SENSITIVE_KEY.test(k)) continue; // deny-by-default: drop the key entirely
-      out[k] = stripSensitive(src[k]);
-    }
-    return out;
-  }
-  return value;
-}
-
-export const defaultRedactionPolicy: RedactionPolicy = {
-  redactSummary(summary) {
-    if (summary === undefined) return undefined;
-    return stripSensitive(summary) as Record<string, unknown>;
-  },
-};

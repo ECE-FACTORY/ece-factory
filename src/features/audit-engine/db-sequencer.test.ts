@@ -3,6 +3,7 @@ import pkg from 'pg';
 const { Pool, Client } = pkg;
 import { PostgresHashChainSink } from './postgres-sink.js';
 import { WriteAheadSequencer, AllowAllAuthorizer, type CommittedIntent, type SequencerRequest } from './sequencer.js';
+import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 
 // T1–T4, T11 — the write-ahead sequencer. NO mocks: real PostgreSQL throughout
 // (T2's "audit unavailable" uses a real pool pointed at an unreachable port).
@@ -14,7 +15,7 @@ const cfg = {
 };
 
 const pool = new Pool({ ...cfg, user: 'ece_app' });
-const sink = new PostgresHashChainSink(pool);
+const sink = new PostgresHashChainSink(pool, new RedactionEngine());
 const seq = new WriteAheadSequencer(sink, new AllowAllAuthorizer());
 let su: InstanceType<typeof Client>;
 
@@ -58,7 +59,7 @@ describe('T1 — log-before-execute (write-ahead ordering)', () => {
 describe('T2 — fail-closed (audit unavailable ⇒ no execution)', () => {
   it('when intent-commit fails, execute never runs and the action is refused', async () => {
     const deadPool = new Pool({ ...cfg, user: 'ece_app', port: 1, connectionTimeoutMillis: 1500 });
-    const deadSink = new PostgresHashChainSink(deadPool);
+    const deadSink = new PostgresHashChainSink(deadPool, new RedactionEngine());
     const deadSeq = new WriteAheadSequencer(deadSink, new AllowAllAuthorizer());
     let executed = false;
     const out = await deadSeq.run(reqFor('orgT2'), async () => {

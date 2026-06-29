@@ -2,11 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
 const { Pool, Client } = pkg;
 import { PostgresHashChainSink } from './postgres-sink.js';
+import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 
-// T9 — redaction-before-write. NO mocks: real PostgreSQL. Writes an intent whose
-// request_summary carries sensitive fields, then inspects the PERSISTED row and proves
-// the sensitive fields never reached the audit store in the clear. The hash is computed
-// over the redacted content, so the entry still verifies.
+// T9 — redaction-before-write, now flowing through the REAL deny-by-default Redaction Engine.
+// NO mocks: real PostgreSQL. Writes an intent whose request_summary carries sensitive fields,
+// then inspects the PERSISTED row and proves they never reached the store in the clear.
+// Allowlist permits only the non-sensitive fields; sensitive keys are dropped by deny-by-default.
 
 const cfg = {
   host: process.env.PGHOST ?? '127.0.0.1',
@@ -15,7 +16,8 @@ const cfg = {
 };
 const ORG = 'orgT9';
 const pool = new Pool({ ...cfg, user: 'ece_app' });
-const sink = new PostgresHashChainSink(pool);
+// Allowlist only the non-sensitive fields this test expects to survive (incl. the nested branch).
+const sink = new PostgresHashChainSink(pool, new RedactionEngine(['query', 'keep_top', 'nested', 'keep']));
 
 let stored: Record<string, unknown> = {};
 

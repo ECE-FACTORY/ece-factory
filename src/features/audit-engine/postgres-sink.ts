@@ -28,7 +28,6 @@ import {
   type OrphanedIntent,
   type AuditRow,
   type RedactionPolicy,
-  defaultRedactionPolicy,
 } from './sink.js';
 
 const J = (v: unknown): string => JSON.stringify(v);
@@ -45,7 +44,9 @@ interface ChainEntry {
 export class PostgresHashChainSink implements AuditSink {
   constructor(
     private readonly pool: Pool,
-    private readonly redaction: RedactionPolicy = defaultRedactionPolicy,
+    // Required: a redaction policy is INJECTED (the Module 24 Redaction Engine in production).
+    // No concrete default — the sink never imports a concrete redactor (packaging boundary).
+    private readonly redaction: RedactionPolicy,
   ) {}
 
   private hashEntry(canonical: string, prevHash: string): string {

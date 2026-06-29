@@ -4,6 +4,7 @@ const { Pool } = pkg;
 import { PostgresHashChainSink } from './postgres-sink.js';
 import { AuditViewer } from './read-audit.js';
 import { AllowAllAuthorizer, type Authorizer, type AuthorizationDecision } from './sequencer.js';
+import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 
 // T7 — audit-of-reads + permissioned viewer. NO mocks: real PostgreSQL.
 // Proves: every read writes a chained audit_read_log entry; reads are per-org scoped;
@@ -16,7 +17,7 @@ const cfg = {
   database: process.env.PGDATABASE ?? 'ece_audit_test',
 };
 const pool = new Pool({ ...cfg, user: 'ece_app' });
-const sink = new PostgresHashChainSink(pool);
+const sink = new PostgresHashChainSink(pool, new RedactionEngine());
 const viewer = new AuditViewer(sink, new AllowAllAuthorizer());
 
 class DenyAuthorizer implements Authorizer {

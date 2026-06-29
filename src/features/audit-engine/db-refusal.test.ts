@@ -4,6 +4,7 @@ const { Pool } = pkg;
 import { PostgresHashChainSink } from './postgres-sink.js';
 import { WriteAheadSequencer, AllowAllAuthorizer, type Authorizer, type AuthorizationDecision } from './sequencer.js';
 import { AuditViewer } from './read-audit.js';
+import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 
 // Refusal-audit path. NO mocks: real PostgreSQL. Proves denied attempts are auditable,
 // chained, per-org scoped, and structurally DISTINCT from orphans.
@@ -14,7 +15,7 @@ const cfg = {
   database: process.env.PGDATABASE ?? 'ece_audit_test',
 };
 const pool = new Pool({ ...cfg, user: 'ece_app' });
-const sink = new PostgresHashChainSink(pool);
+const sink = new PostgresHashChainSink(pool, new RedactionEngine());
 
 class DenyAuthorizer implements Authorizer {
   async authorize(): Promise<AuthorizationDecision> {

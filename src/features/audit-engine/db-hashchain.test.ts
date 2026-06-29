@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pkg from 'pg';
 const { Pool, Client } = pkg;
 import { PostgresHashChainSink } from './postgres-sink.js';
+import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 
 // T6 — hash-chain tamper-evidence. NO mocks: real PostgreSQL. Builds a real chain,
 // then tampers a stored row OUT OF BAND (with the append-only trigger temporarily
@@ -15,7 +16,7 @@ const cfg = {
 };
 const ORG = 'orgT6';
 const pool = new Pool({ ...cfg, user: 'ece_app' });
-const sink = new PostgresHashChainSink(pool);
+const sink = new PostgresHashChainSink(pool, new RedactionEngine());
 
 const actor = { user_id: 'u6', email: 'u6@ece.ae', role: 'admin' };
 const session = { session_id: 's6' };
