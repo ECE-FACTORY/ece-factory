@@ -10,6 +10,9 @@
 | Permission Engine | `src/features/permission-engine/` | 22 (Wave 1 ROOT) | **Built & tested** (deny-by-default; ALLOW/REFUSE/STOP_FOR_APPROVAL; replaced allow-all stub) | [permission-engine.feature.md](../src/features/permission-engine/permission-engine.feature.md) |
 | Kill Switch | `src/features/kill-switch/` | 33 (Wave 1 ROOT) | **Built & tested** (6 scopes; immediate runtime effect; kill-beats-all; standalone) | [kill-switch.feature.md](../src/features/kill-switch/kill-switch.feature.md) |
 | Evidence Pack Engine | `src/features/evidence-pack/` | 16 (Wave 1 ROOT) | **Built & tested** (machine-true-evidence; required-section completeness; standalone) | [evidence-pack.feature.md](../src/features/evidence-pack/evidence-pack.feature.md) |
+| License & Compliance Engine | `src/features/license-compliance/` | 10 (Wave 1 ROOT) | **Built & tested** (text-over-badge SPDX classify; off-allowlist⇒needs-review; stack verdict; standalone) | [license-compliance.feature.md](../src/features/license-compliance/license-compliance.feature.md) |
+
+**Wave 1 ROOTs complete:** 23 Audit · 24 Redaction · 21 Tool Registry · 22 Permission · 33 Kill Switch · 16 Evidence Pack · 10 License & Compliance.
 
 ## Audit Engine — proven guarantees (9)
 
