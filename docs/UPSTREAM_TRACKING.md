@@ -28,8 +28,10 @@ Direct dev dependencies, license verified **live from the npm registry** (`npm v
 | eslint | 10.6.0 | MIT | ✅ accepted |
 | typescript-eslint | 8.62.0 | MIT | ✅ accepted |
 | @types/node | 26.0.1 | MIT | ✅ accepted |
+| pg (node-postgres) | 8.22.0 | MIT | ✅ accepted — added Phase 3.1 (run migration/T5/T8 tests against real PostgreSQL) |
+| @types/pg | 8.20.0 | MIT | ✅ accepted — added Phase 3.1 |
 
-**Full transitive tree scan (129 packages):** MIT 96 · Apache-2.0 15 · ISC 7 · BSD-2-Clause 6 · MPL-2.0 2 · BSD-3-Clause 2 · BlueOak-1.0.0 1. **Copyleft/SSPL/BSL: 0. Unknown: 0.** All are permissive. `package-lock.json` pins the entire tree for reproducible offline (air-gap) builds.
+**Full transitive tree scan (145 packages, Phase 3.1):** MIT 110 · Apache-2.0 15 · ISC 9 · BSD-2-Clause 6 · MPL-2.0 2 · BSD-3-Clause 2 · BlueOak-1.0.0 1. **Copyleft/SSPL/BSL: 0. Unknown: 0.** All are permissive (all on the ratified allowlist). `package-lock.json` pins the entire tree for reproducible offline (air-gap) builds.
 
 - **MPL-2.0 (2):** `lightningcss@1.32.0`, `lightningcss-darwin-arm64@1.32.0` — MPL-2.0 is on the accepted allowlist. ✅
 - **⚠ BlueOak-1.0.0 (1):** `minimatch@10.2.5` (verified live) — permissive, OSI-approved, non-copyleft, MIT-equivalent, but **not on the enumerated allowlist**. **Flagged for human ratification** (same posture as PostgreSQL License + ISC). Not silently accepted. See OPEN_ITEMS / evidence pack. Recommendation: ratify BlueOak-1.0.0 into the accepted set.

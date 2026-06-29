@@ -15,7 +15,9 @@
   "license": "SEE LICENSE — governed by organization-source-of-truth",
   "devDependencies": {
     "@types/node": "26.0.1",
+    "@types/pg": "8.20.0",
     "eslint": "10.6.0",
+    "pg": "8.22.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.62.0",
     "vitest": "4.1.9"
