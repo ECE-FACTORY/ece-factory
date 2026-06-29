@@ -1,0 +1,23 @@
+{
+  "name": "ece-factory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ECE Factory main application. Phase 3.0 toolchain bootstrap — no engine logic yet.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "license": "SEE LICENSE — governed by organization-source-of-truth",
+  "devDependencies": {
+    "@types/node": "26.0.1",
+    "eslint": "10.6.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.62.0",
+    "vitest": "4.1.9"
+  }
+}
