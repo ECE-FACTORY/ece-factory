@@ -42,6 +42,7 @@
 | Feature | Path | Module | Status | Feature file |
 |---------|------|--------|--------|--------------|
 | Domain Registry | `src/features/domain-registry/` | 4 (Wave 4) | **Built & tested** (§4.1 model; deny-by-default validation; append-only PostgreSQL history; standalone) | [domain-registry.feature.md](../src/features/domain-registry/domain-registry.feature.md) |
+| Project Registry | `src/features/project-registry/` | 5 (Wave 4) | **Built & tested** (§5.4 status vocab; deny-by-default + domain-registered check; harvest-before-build gate; append-only PostgreSQL; standalone) | [project-registry.feature.md](../src/features/project-registry/project-registry.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
