@@ -23,6 +23,7 @@ import {
   type EntryRef,
   type InclusionProof,
   type VerifyResult,
+  type OrphanedIntent,
   type RedactionPolicy,
   defaultRedactionPolicy,
 } from './sink.js';
@@ -167,6 +168,27 @@ export class PostgresHashChainSink implements AuditSink {
       prevExpected = e.entry_hash;
     }
     return { ok: true, checked };
+  }
+
+  async orphanedIntents(organization_id: string, olderThanSeconds = 0): Promise<OrphanedIntent[]> {
+    return this.inOrgTx(organization_id, false, async (c) => {
+      const r = await c.query<{ intent_id: string; seq: string; ts: Date | string }>(
+        `SELECT i.intent_id, i.seq, i.ts
+           FROM audit_intent i
+           LEFT JOIN audit_result r
+             ON r.intent_id = i.intent_id AND r.organization_id = i.organization_id
+          WHERE i.organization_id = $1
+            AND r.result_id IS NULL
+            AND i.ts <= now() - ($2 || ' seconds')::interval
+          ORDER BY i.seq`,
+        [organization_id, String(olderThanSeconds)],
+      );
+      return r.rows.map((x) => ({
+        intent_id: x.intent_id,
+        seq: Number(x.seq),
+        ts: x.ts instanceof Date ? x.ts.toISOString() : String(x.ts),
+      }));
+    });
   }
 
   // Extension point (ARCHITECTURE §8): the Postgres sink offers no external proof.

@@ -67,11 +67,20 @@ export interface EntryRef {
   seq: number;
 }
 
+/** A committed intent with no matching result — a possible partial action (§I3). */
+export interface OrphanedIntent {
+  intent_id: string;
+  seq: number;
+  ts: string;
+}
+
 export interface AuditSink {
   appendIntent(entry: IntentInput): Promise<AppendResult & { intent_id: string }>;
   appendResult(intentRef: { intent_id: string; organization_id: string }, result: ResultPayload): Promise<AppendResult>;
   appendRead(entry: ReadInput): Promise<AppendResult>;
   verifyChain(organization_id: string): Promise<VerifyResult>;
+  /** Intents with no matching result, older than the grace window (§I3 orphan detection). */
+  orphanedIntents(organization_id: string, olderThanSeconds?: number): Promise<OrphanedIntent[]>;
   /** Extension point: null for the Postgres sink; a Merkle proof for a verifiable-log sink. */
   proof(entryRef: EntryRef): InclusionProof | null;
 }
