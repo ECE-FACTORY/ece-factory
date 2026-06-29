@@ -24,6 +24,12 @@
 
 **Wave 2 Review Spine complete:** 15 Dual-Claude Review · 17 Approval Gate · 26 Compliance Checker.
 
+## Wave 3 — Sourcing & Build CORE
+
+| Feature | Path | Module | Status | Feature file |
+|---------|------|--------|--------|--------------|
+| Repo Intelligence Engine | `src/features/repo-intelligence/` | 9 (Wave 3) | **Built & tested** (factory memory; repo text inert; deny-by-default eligibility; append-only PostgreSQL) | [repo-intelligence.feature.md](../src/features/repo-intelligence/repo-intelligence.feature.md) |
+
 ## Audit Engine — proven guarantees (9)
 
 Each is proven by a test running against **real PostgreSQL 16.14** (no mocks); the full suite is 25/25 green.
