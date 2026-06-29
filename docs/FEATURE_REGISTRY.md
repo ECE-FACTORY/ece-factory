@@ -46,6 +46,7 @@
 | Source-of-Truth Doc Engine | `src/features/doc-engine/` | 27 (Wave 4) | **Built & tested** (§5 required docs; no-placeholders; bidirectional code↔docs alignment; deny-by-default; standalone) | [doc-engine.feature.md](../src/features/doc-engine/doc-engine.feature.md) |
 | Feature Registry Engine | `src/features/feature-registry/` | 28 (Wave 4) | **Built & tested** (§8 no-feature-only-in-code; built-without-tests/permissions flagged; deny-by-default; standalone) | [feature-registry.feature.md](../src/features/feature-registry/feature-registry.feature.md) |
 | Repo Builder / Operator | `src/features/repo-builder/` | 29 (Wave 4) | **Built & tested** (§5 governed-repo plan; plans-only/never-executes; harvest-before-build gate inherited; deny-by-default; standalone) | [repo-builder.feature.md](../src/features/repo-builder/repo-builder.feature.md) |
+| Risk Register | `src/features/risk-register/` | 31 (Wave 4) | **Built & tested** (§31 typed register; deny-by-default validation; open-risk surfacer (unmitigated high/critical surfaced as blocking); append-only PostgreSQL; standalone) | [risk-register.feature.md](../src/features/risk-register/risk-register.feature.md) |
 
 ## Audit Engine — proven guarantees (9)
 
