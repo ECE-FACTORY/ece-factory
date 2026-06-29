@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ClassDispatcher, DRAFT_STATUS, type ConsumedApproval, type ApprovalGatePort } from './tool-classes.js';
+import { ClassDispatcher, DRAFT_STATUS, BridgeApprovalGate, type ConsumedApproval } from './tool-classes.js';
 import { ApprovalGate, type ActionDescriptor } from '../approval-gate/approval-gate.js';
 
 function action(tool = 'fixture_write'): ActionDescriptor {
   return { tool, risk: 'WRITE_LOW_RISK', reversible: 'yes', requestedBy: { user_id: 'u1', email: 'u1@ece.ae', role: 'admin' } };
 }
+const bind = (tool = 'fixture_write') => ({ tool });
 
 // Tool classification taxonomy (Phase 8.1, Part A) — STRUCTURAL enforcement of all four classes, proven
 // with fixture handlers (no real draft/write tool is exposed). The point of each test: the class's limit
@@ -50,8 +51,8 @@ describe('Taxonomy — APPROVAL_REQUIRED_WRITE cannot execute without a single-u
     const gate = new ApprovalGate();
     const q = gate.request(action());
     const writeSpy = vi.fn(async () => 'mutated');
-    const d = new ClassDispatcher(gate); // real gate, but action not yet approved
-    const out = await d.dispatch('APPROVAL_REQUIRED_WRITE', { approvalWrite: writeSpy }, { tool: 'fixture_write', approvalActionId: q.actionId });
+    const d = new ClassDispatcher(new BridgeApprovalGate(gate)); // real gate, but action not yet approved
+    const out = await d.dispatch('APPROVAL_REQUIRED_WRITE', { approvalWrite: writeSpy }, { tool: 'fixture_write', approvalActionId: q.actionId, approvalBinding: bind() });
     expect(out.status).toBe('STOP_FOR_APPROVAL');
     expect(writeSpy).not.toHaveBeenCalled();
   });
@@ -62,8 +63,8 @@ describe('Taxonomy — APPROVAL_REQUIRED_WRITE cannot execute without a single-u
     gate.resolve({ actionId: q.actionId, approver: { user_id: 'human_boss', email: 'boss@ece.ae', role: 'admin' }, decision: 'APPROVE', reason: 'reviewed and approved' });
     let received: ConsumedApproval | undefined;
     const writeSpy = vi.fn(async (a: ConsumedApproval) => { received = a; return 'mutated'; });
-    const d = new ClassDispatcher(gate);
-    const out = await d.dispatch('APPROVAL_REQUIRED_WRITE', { approvalWrite: writeSpy }, { tool: 'fixture_write', approvalActionId: q.actionId });
+    const d = new ClassDispatcher(new BridgeApprovalGate(gate));
+    const out = await d.dispatch('APPROVAL_REQUIRED_WRITE', { approvalWrite: writeSpy }, { tool: 'fixture_write', approvalActionId: q.actionId, approvalBinding: bind() });
     expect(out.status).toBe('executed');
     expect(writeSpy).toHaveBeenCalledTimes(1);
     expect(received?.approvalId).toBeTruthy();
@@ -92,7 +93,7 @@ describe('Dispatch-by-class — a lower class cannot reach a higher-privilege pa
     const approved = new ApprovalGate();
     const q = approved.request(action('t'));
     approved.resolve({ actionId: q.actionId, approver: { user_id: 'boss', email: 'b@e', role: 'admin' }, decision: 'APPROVE', reason: 'ok' });
-    const gate: ApprovalGatePort = approved;
+    const gate = new BridgeApprovalGate(approved);
 
     const calls: string[] = [];
     const handlers = {
@@ -100,7 +101,7 @@ describe('Dispatch-by-class — a lower class cannot reach a higher-privilege pa
       draftOnly: async () => { calls.push('draft'); return 'd'; },
       approvalWrite: async () => { calls.push('write'); return 'w'; },
     };
-    const ro = await new ClassDispatcher(gate).dispatch('READ_ONLY', handlers, { tool: 't', approvalActionId: q.actionId });
+    const ro = await new ClassDispatcher(gate).dispatch('READ_ONLY', handlers, { tool: 't', approvalActionId: q.actionId, approvalBinding: bind('t') });
     expect(ro.status).toBe('ok');
     expect(calls).toEqual(['read']); // READ_ONLY reached ONLY the read path — not write, despite an approved token
   });

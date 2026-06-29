@@ -22,10 +22,74 @@ export type ToolClass = (typeof TOOL_CLASSES)[number];
 /** The draft success literal. There is deliberately no committed/executed/approved sibling. */
 export const DRAFT_STATUS = 'DRAFT-AWAITING-HUMAN-REVIEW';
 
-/** Port the dispatcher consults for APPROVAL_REQUIRED_WRITE — the Approval Gate's single-use check. */
+/** The specific action an approval is bound to — tool + optional target + a canonical payload string. */
+export interface ApprovalBinding {
+  tool: string;
+  target?: string;
+  payloadJson?: string;
+}
+export interface ApprovalConsumption {
+  approvalId: string;
+}
+
+/**
+ * Port the dispatcher/bridge consult for APPROVAL_REQUIRED_WRITE. The approval is the entire safety:
+ * single-use, per-action-bound, human-granted, unforgeable. Implementations MUST be single-use (a second
+ * consume for the same action returns null) and per-action-bound (a token for action A returns null for B).
+ */
 export interface ApprovalGatePort {
-  /** Deny-by-default: true ONLY if this specific action has a captured, still-valid APPROVE. */
-  isApproved(actionId: string): boolean;
+  /** Non-consuming deny-by-default check: is this specific action humanly approved and not yet consumed? */
+  isApprovedForAction(actionId: string, binding: ApprovalBinding): boolean;
+  /** Single-use consume: returns a consumption iff approved+bound+unconsumed; marks it consumed; else null. */
+  consumeApproval(actionId: string, binding: ApprovalBinding): ApprovalConsumption | null;
+}
+
+/** Minimal read shape over the Approval Gate engine (structural — no engine import). */
+export interface ApprovalGateReader {
+  get(actionId: string): {
+    state: string;
+    action: { tool: string; target?: string; after?: unknown };
+    resolution?: { approvalId: string; approver: { user_id: string } };
+  } | undefined;
+}
+
+/** Stable canonical string for an action payload, used for per-action binding without a crypto dep. */
+export function canonicalPayload(payload: unknown): string {
+  return JSON.stringify(payload ?? null);
+}
+
+/**
+ * Bridge-layer adapter over the Wave-2 Approval Gate (engine untouched). Adds the three write-tier
+ * guarantees the dispatcher needs: SINGLE-USE (a consumed action cannot be replayed), PER-ACTION BINDING
+ * (tool+target+payload must match the approved descriptor), and SELF-APPROVAL REJECTION (the approver must
+ * be a real human, never "claude" or the calling agent).
+ */
+export class BridgeApprovalGate implements ApprovalGatePort {
+  private readonly consumed = new Set<string>();
+  constructor(private readonly gate: ApprovalGateReader, private readonly caller?: string) {}
+
+  isApprovedForAction(actionId: string, binding: ApprovalBinding): boolean {
+    return this.check(actionId, binding) !== null;
+  }
+
+  consumeApproval(actionId: string, binding: ApprovalBinding): ApprovalConsumption | null {
+    const ok = this.check(actionId, binding);
+    if (!ok) return null;
+    this.consumed.add(actionId); // SINGLE-USE: consumed on use; a replay fails the consumed-set check below
+    return { approvalId: ok.approvalId };
+  }
+
+  private check(actionId: string | undefined, binding: ApprovalBinding): { approvalId: string } | null {
+    if (!actionId || this.consumed.has(actionId)) return null; // single-use
+    const q = this.gate.get(actionId);
+    if (!q || q.state !== 'approved' || !q.resolution) return null; // deny-by-default: must be a captured APPROVE
+    const approver = q.resolution.approver.user_id.trim().toLowerCase();
+    if (approver === 'claude' || (this.caller && approver === this.caller.trim().toLowerCase())) return null; // no self-approval
+    if (q.action.tool !== binding.tool) return null; // per-action: tool
+    if ((q.action.target ?? '') !== (binding.target ?? '')) return null; // per-action: target
+    if (canonicalPayload(q.action.after) !== (binding.payloadJson ?? canonicalPayload(undefined))) return null; // per-action: payload
+    return { approvalId: q.resolution.approvalId };
+  }
 }
 
 // ── Branded single-use approval token (structural no-execute-without-approval) ───────────────────────
@@ -63,6 +127,8 @@ export type ClassDispatchOutcome<R, D, W> =
 export interface DispatchContext {
   /** Required only for APPROVAL_REQUIRED_WRITE — the specific Approval Gate action id to consume. */
   approvalActionId?: string;
+  /** The action binding the token must match (per-action). */
+  approvalBinding?: ApprovalBinding;
   tool?: string;
 }
 
@@ -90,7 +156,7 @@ export class ClassDispatcher {
       }
       case 'APPROVAL_REQUIRED_WRITE': {
         if (!handlers.approvalWrite) return refuse('APPROVAL_REQUIRED_WRITE', 'dispatch', 'no write handler');
-        const approval = this.consume(ctx.approvalActionId, ctx.tool ?? '');
+        const approval = this.consume(ctx);
         if (!approval) {
           // No single-use token ⇒ execution is withheld; there is no execute path here.
           return { status: 'STOP_FOR_APPROVAL', toolClass: 'APPROVAL_REQUIRED_WRITE', reason: 'no single-use approval token — execution withheld (deny-by-default)' };
@@ -104,9 +170,12 @@ export class ClassDispatcher {
     }
   }
 
-  private consume(actionId: string | undefined, tool: string): ConsumedApproval | null {
-    if (!actionId || !this.approval?.isApproved(actionId)) return null;
-    return mintConsumedApproval(actionId, tool);
+  private consume(ctx: DispatchContext): ConsumedApproval | null {
+    if (!ctx.approvalActionId || !this.approval) return null;
+    const binding = ctx.approvalBinding ?? { tool: ctx.tool ?? '' };
+    const c = this.approval.consumeApproval(ctx.approvalActionId, binding); // single-use + per-action (adapter)
+    if (!c) return null;
+    return mintConsumedApproval(c.approvalId, binding.tool);
   }
 }
 

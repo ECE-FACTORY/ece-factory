@@ -25,16 +25,22 @@
 import type { ToolRegistryReader, ToolDefinition } from '../tool-registry/tool-registry.js';
 import type { SequencerRequest, SequencerOutcome, ExecuteFn } from '../audit-engine/sequencer.js';
 import type { HumanActor, SessionInfo, Environment } from '../audit-engine/schema.js';
-import { ClassDispatcher, DRAFT_STATUS, type ApprovalGatePort } from './tool-classes.js';
+import { ClassDispatcher, DRAFT_STATUS, canonicalPayload, type ConsumedApproval, type ApprovalGatePort } from './tool-classes.js';
 import { classifyRegisteredTool, FACTORY_READ_TOOLS, type FactoryReadTool, type FactoryReadPorts, type FactoryReadParams } from './factory-read-tools.js';
 import { DRAFT_TOOLS, type DraftTool, type DraftPorts, type DraftParams } from './draft-tools.js';
+import { WRITE_TOOLS, type WriteTool, type WriteStores, type WriteParams, type WriteRecord } from './write-tools.js';
+
+/** Internal: a committed write record plus the consumed approval id (proof the write ran under approval). */
+interface WriteRecordResult { record: WriteRecord; approvalId: string }
 
 /** The READ_ONLY surface: the system-of-record tool (8.0) + the factory read tools (8.1). */
 export const EXPOSED_READ_TOOLS = ['search_clients', ...FACTORY_READ_TOOLS] as const;
 /** The DRAFT_ONLY surface (8.2) — proposers, never actions. */
 export const EXPOSED_DRAFT_TOOLS = [...DRAFT_TOOLS] as const;
-/** The full exposed surface — READ_ONLY + DRAFT_ONLY only (no write/external tool this phase). */
-export const EXPOSED_TOOLS = [...EXPOSED_READ_TOOLS, ...EXPOSED_DRAFT_TOOLS] as const;
+/** The APPROVAL_REQUIRED_WRITE surface (8.3) — internal factory-state mutations, each token-gated. */
+export const EXPOSED_WRITE_TOOLS = [...WRITE_TOOLS] as const;
+/** The full exposed surface — READ_ONLY + DRAFT_ONLY + APPROVAL_REQUIRED_WRITE(internal) only (no external tool). */
+export const EXPOSED_TOOLS = [...EXPOSED_READ_TOOLS, ...EXPOSED_DRAFT_TOOLS, ...EXPOSED_WRITE_TOOLS] as const;
 export type ExposedToolName = (typeof EXPOSED_TOOLS)[number];
 /** @deprecated kept for Phase 8.0 compatibility — the full surface is EXPOSED_TOOLS. */
 export const BRIDGE_TOOLS = ['search_clients'] as const;
@@ -93,13 +99,25 @@ export type DraftOutcome =
   | { status: typeof DRAFT_STATUS; tool: DraftTool; draft: unknown; auditSeq: number }
   | { status: 'refused'; tool: string; stage: BridgeRefusalStage; reason: string };
 
+/**
+ * Outcome of an APPROVAL_REQUIRED_WRITE tool. Success is WRITE-COMMITTED — the genuine committed state — but
+ * it is reachable ONLY from the dispatcher's executed branch, which requires a consumed ConsumedApproval
+ * token. No approval ⇒ STOP_FOR_APPROVAL (nothing written). A refused/killed path ⇒ refused. There is no
+ * committed state reachable without a consumed human token.
+ */
+export type WriteOutcome =
+  | { status: 'WRITE-COMMITTED'; tool: WriteTool; committed: unknown; approvalId: string; auditSeq: number }
+  | { status: 'STOP_FOR_APPROVAL'; tool: WriteTool; reason: string }
+  | { status: 'refused'; tool: string; stage: BridgeRefusalStage; reason: string };
+
 /** Internal flat result of a guarded, class-dispatched production (read or draft). */
 type GuardedValue<T> = { ok: true; value: T; auditSeq: number } | { ok: false; stage: BridgeRefusalStage; reason: string };
 
 export interface McpBridgeOptions {
   factoryPorts?: FactoryReadPorts;
   draftPorts?: DraftPorts;
-  /** Reserved: the Approval Gate the dispatcher consults for APPROVAL_REQUIRED_WRITE (no write tool exposed yet). */
+  writeStores?: WriteStores;
+  /** The Approval Gate the bridge pre-checks and the dispatcher consumes for APPROVAL_REQUIRED_WRITE. */
   approvalGate?: ApprovalGatePort;
 }
 
@@ -107,6 +125,8 @@ export class McpBridge {
   private readonly dispatcher: ClassDispatcher;
   private readonly factoryPorts?: FactoryReadPorts;
   private readonly draftPorts?: DraftPorts;
+  private readonly writeStores?: WriteStores;
+  private readonly approvalGate?: ApprovalGatePort;
 
   constructor(
     private readonly registry: ToolRegistryReader,
@@ -117,6 +137,8 @@ export class McpBridge {
   ) {
     this.factoryPorts = opts.factoryPorts;
     this.draftPorts = opts.draftPorts;
+    this.writeStores = opts.writeStores;
+    this.approvalGate = opts.approvalGate;
     this.dispatcher = new ClassDispatcher(opts.approvalGate);
   }
 
@@ -156,6 +178,89 @@ export class McpBridge {
     if (!g.ok) return { status: 'refused', tool: name, stage: g.stage, reason: g.reason };
     // The proposed artifact is wrapped in the draft literal — NOT committed, recorded, or acted on.
     return { status: DRAFT_STATUS, tool: name, draft: g.value, auditSeq: g.auditSeq };
+  }
+
+  /**
+   * Phase 8.3 — an APPROVAL_REQUIRED_WRITE internal-state mutation. It commits ONLY with a single-use,
+   * per-action, human-approved, unforgeable ConsumedApproval token. No token ⇒ STOP_FOR_APPROVAL (nothing
+   * written). The mutation runs inside the committed audit callback (intent before, result after).
+   */
+  async writeWithTool(name: WriteTool, ctx: BridgeCallContext, params: WriteParams = {}): Promise<WriteOutcome> {
+    if (!this.writeStores) return { status: 'refused', tool: name, stage: 'registry', reason: 'write stores not configured' };
+    // 1. TOOL REGISTRY — fail-closed.
+    let def: ToolDefinition;
+    try {
+      def = this.registry.require(name);
+    } catch {
+      return { status: 'refused', tool: name, stage: 'registry', reason: `tool not registered: "${name}" (fail-closed)` };
+    }
+    // 2. DISPATCH-BY-CLASS — this entrypoint serves ONLY APPROVAL_REQUIRED_WRITE tools.
+    const toolClass = classifyRegisteredTool(def);
+    if (toolClass !== 'APPROVAL_REQUIRED_WRITE') {
+      return { status: 'refused', tool: name, stage: 'read-only-gate', reason: `"${name}" is ${toolClass}; not an approval-gated write` };
+    }
+    const binding = { tool: name, target: params.target, payloadJson: canonicalPayload(params.payload) };
+    // 3. APPROVAL PRE-CHECK (non-consuming): no single-use, per-action human approval ⇒ STOP, nothing written.
+    //    The token is only CONSUMED later, inside the committed callback, after authorize (kill) passes —
+    //    so a killed/unauthorized write refuses with the token preserved (kill beats approval).
+    if (!this.approvalGate || !params.approvalActionId || !this.approvalGate.isApprovedForAction(params.approvalActionId, binding)) {
+      return { status: 'STOP_FOR_APPROVAL', tool: name, reason: 'no single-use, per-action human approval for this action — write withheld (deny-by-default)' };
+    }
+    // 4. GUARD STACK + audit-bracketed mutation.
+    const g = await this.runGuardedWrite(name, def, ctx, params, binding);
+    if (!g.ok) return { status: 'refused', tool: name, stage: g.stage, reason: g.reason };
+    const v = g.value as { committed: unknown; approvalId: string };
+    return { status: 'WRITE-COMMITTED', tool: name, committed: v.committed, approvalId: v.approvalId, auditSeq: g.auditSeq };
+  }
+
+  // ── the guarded write: authorize (Permission → Kill Switch; kill beats approval) → audit intent → consume
+  //    the single-use token + mutate inside the committed callback → audit result → redact. ──
+  private async runGuardedWrite(
+    name: WriteTool,
+    def: ToolDefinition,
+    ctx: BridgeCallContext,
+    params: WriteParams,
+    binding: { tool: string; target?: string; payloadJson?: string },
+  ): Promise<GuardedValue<{ committed: unknown; approvalId: string }>> {
+    const req: SequencerRequest = {
+      principal: ctx.principal,
+      organization_id: ctx.organization_id,
+      session: ctx.session,
+      tool: { name, classification: def.classification, permission_level: def.permissionLevel },
+      environment: ctx.environment,
+      via: ctx.via,
+      request_summary: { tool: name, target: params.target },
+    };
+    const outcome = await this.sequencer.run<{ committed: unknown; approvalId: string }>(req, async () => {
+      // authorize (Permission + Kill) has passed; the intent is durable. NOW consume the per-action token —
+      // the mutation is UNREACHABLE without the ConsumedApproval the dispatcher mints here.
+      const d = await this.dispatcher.dispatch<never, never, WriteRecordResult>('APPROVAL_REQUIRED_WRITE', {
+        approvalWrite: (token: ConsumedApproval) => this.mutate(name, params, token),
+      }, { tool: name, approvalActionId: params.approvalActionId, approvalBinding: binding });
+      if (d.status !== 'executed') {
+        // token vanished between pre-check and consume (e.g. concurrent replay) → do NOT mutate.
+        throw new Error(`approval consumption failed: ${d.status}`);
+      }
+      return { value: { committed: d.result.record, approvalId: d.result.approvalId }, outcome: { status: 'success' } };
+    });
+    if (outcome.status === 'refused') return { ok: false, stage: outcome.stage, reason: outcome.reason }; // authorize/kill
+    if (outcome.status === 'execute-failed') return { ok: false, stage: 'execute', reason: 'write withheld — approval not consumable' };
+    return { ok: true, value: { committed: this.redactValue(outcome.value.committed), approvalId: outcome.value.approvalId }, auditSeq: outcome.intent.seq };
+  }
+
+  /** Route the mutation to the matching append-only write store. The token proves a consumed human approval. */
+  private async mutate(name: WriteTool, params: WriteParams, token: ConsumedApproval): Promise<WriteRecordResult> {
+    const s = this.writeStores!;
+    let record: WriteRecord;
+    switch (name) {
+      case 'record_review_decision': record = await s.recordReviewDecision(params); break;
+      case 'record_human_signoff': record = await s.recordHumanSignoff(params); break;
+      case 'create_open_item': record = await s.createOpenItem(params); break;
+      case 'record_approval_gate': record = await s.recordApprovalGate(params); break;
+      case 'update_risk_status': record = await s.updateRiskStatus(params); break;
+      case 'record_wave_signoff': record = await s.recordWaveSignoff(params); break;
+    }
+    return { record, approvalId: token.approvalId };
   }
 
   // ── the single guarded, class-dispatched production path. `expectedClass` is the ONLY handler slot

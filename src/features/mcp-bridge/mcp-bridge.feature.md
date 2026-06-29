@@ -29,6 +29,18 @@ The **single governed gateway** for all factory capabilities — Claude (operato
 
 Same full guard stack as the read tools (no exemption): the draft production is itself an **audited** event (intent+result) and is **redacted** before return. `draft_review_decision` and `draft_wave_report` are **operator-only** (per-tool permissioning). The exposed surface is now **READ_ONLY + DRAFT_ONLY only** — no `APPROVAL_REQUIRED_WRITE`/external tool is registered or exposed; the write/forbidden paths remain defined-but-unused.
 
+## Phase 8.3 — Approval-Gated Internal Write Tools (APPROVAL_REQUIRED_WRITE class)
+6 internal-state write tools (`write-tools.ts`), each registered (registry `WRITE_LOW_RISK`, `readOrWrite: 'write'`, `blastRadius: 1` → APPROVAL_REQUIRED_WRITE), dispatched through the APPROVAL_REQUIRED_WRITE path: `record_review_decision, record_human_signoff, create_open_item, record_approval_gate, update_risk_status, record_wave_signoff`. **Internal factory state only** — no git, GitHub, CRM, email, or deploy. Each mutates an append-only/audited internal store via an injected port.
+
+**The approval token is the entire safety** (`BridgeApprovalGate` over the Wave-2 Approval Gate):
+- **token-gated**: the execute path requires a branded `ConsumedApproval`, minted only after a human approves the specific action. No token ⇒ `STOP_FOR_APPROVAL`, the write never runs.
+- **single-use**: a `ConsumedApproval` is consumed on use; a replayed token cannot authorize a second write.
+- **per-action binding**: the approval is bound to tool + target + payload — a token for action A cannot authorize action B.
+- **unforgeable**: a token not minted by the Approval Gate cannot be constructed (module-private symbol, type-level).
+- **approver is human, never the caller**: the Approval Gate rejects `claude`/self-approval — the calling agent cannot approve its own write.
+
+**Fully governed:** registered → dispatch-by-class → Permission (deny-by-default, per-tool; sign-offs admin-only) → **Kill Switch (a killed write ⇒ REFUSE even with a valid token — kill beats approval, token preserved)** → write-ahead audit (**intent before** the mutation, **result after** — the mutation is bracketed) → mutation lands in an append-only store (no silent overwrite) → redaction on returned data → refusal-audit on REFUSE. Outcome `WRITE-COMMITTED` is reachable **only** via the consumed-token path; there is no committed state without a consumed token. The exposed surface is now **READ_ONLY + DRAFT_ONLY + APPROVAL_REQUIRED_WRITE(internal) only** — no external-action tool is registered or exposed.
+
 ## Phase 8.0 — the first proof tool
 
 ## Placement

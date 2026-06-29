@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { McpBridge, EXPOSED_TOOLS, EXPOSED_DRAFT_TOOLS, type BridgeCallContext, type AuditedSequencerPort, type DraftOutcome } from './mcp-bridge.js';
+import { McpBridge, EXPOSED_READ_TOOLS, EXPOSED_DRAFT_TOOLS, type BridgeCallContext, type AuditedSequencerPort, type DraftOutcome } from './mcp-bridge.js';
 import { DRAFT_TOOLS, registerDraftTools, type DraftPorts } from './draft-tools.js';
 import { registerFactoryReadTools, classifyRegisteredTool } from './factory-read-tools.js';
 import { DRAFT_STATUS } from './tool-classes.js';
@@ -186,7 +186,7 @@ describe('Draft tools — surface is READ_ONLY + DRAFT_ONLY only (no higher tier
   it('no APPROVAL_REQUIRED_WRITE / FORBIDDEN / external tool is registered or exposed', () => {
     const { bridge, registry } = build();
     const tools = bridge.listTools();
-    expect(tools).toHaveLength(EXPOSED_TOOLS.length); // 16 read + 7 draft = 23
+    expect(tools).toHaveLength(EXPOSED_READ_TOOLS.length + EXPOSED_DRAFT_TOOLS.length); // 16 read + 7 draft = 23 (no write registered here)
     for (const t of tools) {
       const cls = classifyRegisteredTool(registry.require(t.name));
       expect(['READ_ONLY', 'DRAFT_ONLY']).toContain(cls); // never a write/forbidden tier
