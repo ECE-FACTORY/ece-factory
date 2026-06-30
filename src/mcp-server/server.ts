@@ -18,7 +18,9 @@ const { Pool } = pkg;
 import { McpServerCore, type McpServerBridge } from './server-core.js';
 import { LiveFactoryReadPorts, type LiveReadSources } from './live-read-adapters.js';
 import { LiveWriteStores } from './live-write-adapters.js';
-import { McpBridge } from '../features/mcp-bridge/mcp-bridge.js';
+import { buildTierStatusReport, makeDbProbe, type TierStatusReport } from './tier-status.js';
+import { McpBridge, EXPOSED_READ_TOOLS, EXPOSED_DRAFT_TOOLS, EXPOSED_WRITE_TOOLS, EXPOSED_EXTERNAL_TOOLS } from '../features/mcp-bridge/mcp-bridge.js';
+import { FORBIDDEN_TOOLS } from '../features/mcp-bridge/external-tools.js';
 import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
 import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-tools.js';
 import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draft-tools.js';
@@ -101,7 +103,7 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
 }
 
 /** Build the bridge (live reads + fake writes/externals) and the server core. No stdin involved — testable. */
-export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool> } {
+export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport> } {
   const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });          // READ_ONLY tier + audit
   const writePool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgWriteUser }); // internal-write tier (append-INSERT only)
 
@@ -125,14 +127,15 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
     'owner', 'title', 'kind', 'seq', 'organization_id', 'project', 'registeredAtIso', 'recordId',
   ]);
 
+  // Injected ports are hoisted so the tier-status reporter inspects the REAL objects that are wired.
+  const factoryPorts = new LiveFactoryReadPorts(liveSources); // LIVE reads
+  const writeStores = new LiveWriteStores(writePool);         // LIVE internal-write (append-only; token-gated)
+  const draftPorts = fakeDraftPorts();                        // drafts on fakes
+  const externalSystems = fakeExternalSystems();              // external on fakes
+
   const bridge = new McpBridge(
     registry, sequencer, new PostgresClientReadModel(pool), redactor,
-    {
-      factoryPorts: new LiveFactoryReadPorts(liveSources), // LIVE reads
-      writeStores: new LiveWriteStores(writePool),         // LIVE internal-write (append-only; token-gated by the bridge)
-      draftPorts: fakeDraftPorts(), externalSystems: fakeExternalSystems(), // drafts + external stay on fakes
-      approvalGate: new BridgeApprovalGate(new ApprovalGate(), cfg.principal.user_id),
-    },
+    { factoryPorts, writeStores, draftPorts, externalSystems, approvalGate: new BridgeApprovalGate(new ApprovalGate(), cfg.principal.user_id) },
   );
   const core = new McpServerCore(bridge as McpServerBridge, registry);
   const ctx: BridgeCallContext = {
@@ -140,14 +143,28 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
     session: { session_id: `mcp-${cfg.principal.user_id}`, connector_type: 'mcp', source_application: 'claude-code' },
     environment: cfg.environment, via: 'claude-code',
   };
-  return { core, ctx, pool, writePool };
+  // Tier-status reporter — derives each tier's backing from the REAL injected objects; read-only DB probe.
+  const tierStatus = (): Promise<TierStatusReport> => buildTierStatusReport({
+    factoryPorts, draftPorts, writeStores, externalSystems,
+    readRole: cfg.pgUser, writeRole: cfg.pgWriteUser,
+    toolCounts: {
+      read_only: EXPOSED_READ_TOOLS.length, draft_only: EXPOSED_DRAFT_TOOLS.length,
+      internal_write: EXPOSED_WRITE_TOOLS.length, external: EXPOSED_EXTERNAL_TOOLS.length, forbidden: FORBIDDEN_TOOLS.length,
+    },
+  }, makeDbProbe(pool));
+  return { core, ctx, pool, writePool, tierStatus };
 }
 
 // ── JSON-RPC 2.0 over stdio (the MCP transport subset Claude Code uses) ──
 export interface JsonRpcMessage { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown>; }
 
-export async function handleRpc(core: McpServerCore, ctx: BridgeCallContext, msg: JsonRpcMessage): Promise<object | null> {
+export async function handleRpc(core: McpServerCore, ctx: BridgeCallContext, msg: JsonRpcMessage, tierStatus?: () => Promise<TierStatusReport>): Promise<object | null> {
   const id = msg.id ?? null;
+  if (msg.method === 'health') {
+    // Observational tier-status — no tool call, no side effect, no secrets (role names/booleans/counts only).
+    const report = tierStatus ? await tierStatus() : { error: 'tier-status not available' };
+    return { jsonrpc: '2.0', id, result: report };
+  }
   if (msg.method === 'initialize') {
     return { jsonrpc: '2.0', id, result: { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: SERVER_NAME, version: SERVER_VERSION } } };
   }
@@ -164,10 +181,20 @@ export async function handleRpc(core: McpServerCore, ctx: BridgeCallContext, msg
   return { jsonrpc: '2.0', id, error: { code: -32601, message: `method not found: ${msg.method}` } };
 }
 
+/** Operational `npm run mcp:healthz` — build from env, print the tier-status report (no secrets), close pools. */
+export async function printHealth(): Promise<void> {
+  const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+  const cfg = envConfig(process.env, repoRoot);
+  const { pool, writePool, tierStatus } = buildServer(cfg);
+  const report = await tierStatus();
+  process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+  await pool.end(); await writePool.end();
+}
+
 export async function main(): Promise<void> {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
   const cfg = envConfig(process.env, repoRoot);
-  const { core, ctx } = buildServer(cfg);
+  const { core, ctx, tierStatus } = buildServer(cfg);
   const rl = createInterface({ input: process.stdin });
   process.stderr.write(`[ece-factory mcp] up — ${core.listTools().length} tools, READ_ONLY + internal-write live (append-only, token-gated); externals on fakes\n`);
   for await (const line of rl) {
@@ -175,7 +202,7 @@ export async function main(): Promise<void> {
     if (!trimmed) continue;
     let msg: JsonRpcMessage;
     try { msg = JSON.parse(trimmed) as JsonRpcMessage; } catch { continue; }
-    const resp = await handleRpc(core, ctx, msg);
+    const resp = await handleRpc(core, ctx, msg, tierStatus);
     if (resp) process.stdout.write(JSON.stringify(resp) + '\n');
   }
 }
