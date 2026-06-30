@@ -11,6 +11,7 @@
 import { LiveFactoryReadPorts } from './live-read-adapters.js';
 import { LiveWriteStores } from './live-write-adapters.js';
 import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
+import { LiveGitHubIssueAdapter } from './live-github-issue-adapter.js';
 import { EXTERNAL_TOOLS, type ExternalTool } from '../features/mcp-bridge/external-tools.js';
 
 export type TierBacking = 'live' | 'fake' | 'disabled' | 'not-wired';
@@ -114,7 +115,7 @@ export async function buildTierStatusReport(wiring: TierWiring, probe?: DbProbe)
   // Per-action external backing — each derived from ITS real adapter instance (instanceof the live class);
   // fall back to the single `externalSystems` object when no per-action map is supplied. A fake is NEVER live.
   const externalByAction = Object.fromEntries(
-    EXTERNAL_ACTIONS.map((a) => [a, deriveBacking(wiring.externalAdapters?.[a] ?? wiring.externalSystems, [LiveGitHubRepoAdapter])]),
+    EXTERNAL_ACTIONS.map((a) => [a, deriveBacking(wiring.externalAdapters?.[a] ?? wiring.externalSystems, [LiveGitHubRepoAdapter, LiveGitHubIssueAdapter])]),
   ) as Record<ExternalAction, TierBacking>;
 
   return {

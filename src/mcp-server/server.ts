@@ -20,6 +20,7 @@ import { LiveFactoryReadPorts, type LiveReadSources } from './live-read-adapters
 import { LiveWriteStores } from './live-write-adapters.js';
 import { buildTierStatusReport, makeDbProbe, type TierStatusReport, type ExternalAction } from './tier-status.js';
 import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
+import { LiveGitHubIssueAdapter } from './live-github-issue-adapter.js';
 import { McpBridge, EXPOSED_READ_TOOLS, EXPOSED_DRAFT_TOOLS, EXPOSED_WRITE_TOOLS, EXPOSED_EXTERNAL_TOOLS } from '../features/mcp-bridge/mcp-bridge.js';
 import { FORBIDDEN_TOOLS } from '../features/mcp-bridge/external-tools.js';
 import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
@@ -64,18 +65,26 @@ function fakeExternalSystems(): ExternalSystems {
 function buildExternalWiring(env: NodeJS.ProcessEnv): { externalSystems: ExternalSystems; externalAdapters: Record<ExternalAction, object> } {
   const fake = fakeExternalSystems();
   const githubLive = env.ECE_GITHUB_LIVE === '1';
-  // create_github_repo backing: the live adapter (throws loudly if token unset) or the fake. Narrow type — it
-  // owns exactly one action, so it cannot be misused for any other external action.
+  const dryRun = env.ECE_GITHUB_DRYRUN === '1';
+  // Each live adapter owns EXACTLY one action (narrow type) — it cannot be misused for any other action. Both
+  // throw LOUDLY if the token is unset (no silent fake fallback). Opt-in via ECE_GITHUB_LIVE.
   const github: Pick<ExternalSystems, 'createGithubRepo'> = githubLive
-    ? new LiveGitHubRepoAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun: env.ECE_GITHUB_DRYRUN === '1' })
+    ? new LiveGitHubRepoAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun })
+    : fake;
+  const issues: Pick<ExternalSystems, 'createTicket'> = githubLive
+    ? new LiveGitHubIssueAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun })
     : fake;
   const externalAdapters: Record<ExternalAction, object> = {
-    create_github_repo: github, open_pull_request: fake, create_ticket: fake,
+    create_github_repo: github, create_ticket: issues, open_pull_request: fake,
     update_crm_record: fake, send_email: fake, deploy_package: fake,
   };
-  // The composite the bridge calls: the five non-github actions stay exactly on the fakes; ONLY
-  // create_github_repo is overridden to route to its (live|fake) adapter. The gate is unchanged.
-  const externalSystems: ExternalSystems = { ...fake, createGithubRepo: (t, p) => github.createGithubRepo(t, p) };
+  // The composite the bridge calls: the four remaining actions stay exactly on the fakes; ONLY
+  // create_github_repo and create_ticket are overridden to route to their (live|fake) adapters. Gate unchanged.
+  const externalSystems: ExternalSystems = {
+    ...fake,
+    createGithubRepo: (t, p) => github.createGithubRepo(t, p),
+    createTicket: (t, p) => issues.createTicket(t, p),
+  };
   return { externalSystems, externalAdapters };
 }
 
