@@ -9,7 +9,7 @@ import { PermissionEngine } from '../permission-engine/permission-engine.js';
 import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 import { InMemoryKillSwitch } from '../kill-switch/kill-switch.js';
 import { ApprovalGate, type ActionDescriptor } from '../approval-gate/approval-gate.js';
-import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent } from '../audit-engine/sequencer.js';
+import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../audit-engine/sequencer.js';
 
 // Approval-gated internal write tools (Phase 8.3) — pure-logic. The guard DECISIONS are real (Permission +
 // Kill Switch), the approval mechanism is the real ApprovalGate behind BridgeApprovalGate, and the stores
@@ -20,6 +20,7 @@ class FakeSequencer implements AuditedSequencerPort {
   intents: string[] = []; results: number[] = []; refusals: { tool: string }[] = [];
   private seq = 0;
   constructor(private readonly authorizer: Authorizer) {}
+  async recordRefusal(req: RefusalRequest): Promise<void> { this.refusals.push({ tool: req.tool.name }); }
   async run<T>(req: SequencerRequest, execute: ExecuteFn<T>): Promise<SequencerOutcome<T>> {
     const decision = await this.authorizer.authorize({ human_actor: req.principal, organization_id: req.organization_id, tool: req.tool, environment: req.environment, connector: req.session.connector_id });
     if (decision.decision !== 'ALLOW') { this.refusals.push({ tool: req.tool.name }); return { status: 'refused', stage: 'authorize', reason: decision.reason ?? decision.decision }; }

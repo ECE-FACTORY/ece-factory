@@ -61,6 +61,25 @@ export interface SequencerRequest {
   dashboard?: DashboardInfo;
 }
 
+/**
+ * A denied attempt to be recorded as a distinct refusal entry (§ refusal-audit). Used both by the sequencer's
+ * own authorize-stage denials AND by callers (the MCP Bridge) that refuse an action BEFORE the sequencer runs
+ * (e.g. a missing approval, a FORBIDDEN tool) — so "who tried what they weren't allowed to, and when" is never
+ * invisible to audit, regardless of which guard refused.
+ */
+export interface RefusalRequest {
+  principal: HumanActor;
+  organization_id: string;
+  session: SessionInfo;
+  tool: ToolInfo;
+  environment: Environment;
+  via?: string;
+  /** The guard/point that refused (e.g. 'authorize', 'forbidden', 'approval', 'hardening'). */
+  stage: string;
+  decision: 'REFUSE' | 'STOP_FOR_APPROVAL';
+  reason?: string;
+}
+
 export interface ExecuteOutcome {
   status: 'success' | 'error';
   error_code?: string;
@@ -110,21 +129,17 @@ export class WriteAheadSequencer {
     if (decision.decision !== 'ALLOW') {
       // Record the denied attempt as a distinct refusal entry (never an intent → never an orphan).
       // The action is refused regardless; if refusal-audit itself is unavailable, still refuse.
-      try {
-        await this.sink.appendRefusal({
-          organization_id: req.organization_id,
-          human_actor: req.principal,
-          via: req.via,
-          session: req.session,
-          tool: req.tool,
-          stage: 'authorize',
-          decision: decision.decision,
-          reason: decision.reason,
-          environment: req.environment,
-        });
-      } catch {
-        // refusal-audit unavailable; the action is still denied (fail-closed on the action).
-      }
+      await this.recordRefusal({
+        principal: req.principal,
+        organization_id: req.organization_id,
+        session: req.session,
+        tool: req.tool,
+        environment: req.environment,
+        via: req.via,
+        stage: 'authorize',
+        decision: decision.decision,
+        reason: decision.reason,
+      });
       return { status: 'refused', stage: 'authorize', reason: decision.reason ?? decision.decision };
     }
 
@@ -179,6 +194,31 @@ export class WriteAheadSequencer {
     // 6. RETURN
     if (thrown !== undefined) return { status: 'execute-failed', intent: committed, result, error: thrown };
     return { status: 'completed', value: value as T, intent: committed, result };
+  }
+
+  /**
+   * Record a denied attempt as a distinct refusal entry (never an intent → never an orphan). Callers that
+   * refuse BEFORE invoking `run` (the MCP Bridge: missing approval, FORBIDDEN, encapsulated, hardening, a
+   * registry/tier miss) route through here so a denial is auditable no matter which guard refused.
+   * FAIL-SOFT BY DESIGN: a refusal-audit that cannot be written must NEVER turn a refusal into an allow — the
+   * caller has already decided to deny. So this swallows storage errors (the action stays denied regardless).
+   */
+  async recordRefusal(req: RefusalRequest): Promise<void> {
+    try {
+      await this.sink.appendRefusal({
+        organization_id: req.organization_id,
+        human_actor: req.principal, // the real human — never "claude"
+        via: req.via,
+        session: req.session,
+        tool: req.tool,
+        stage: req.stage,
+        decision: req.decision,
+        reason: req.reason,
+        environment: req.environment,
+      });
+    } catch {
+      // refusal-audit unavailable; the action is still denied (fail-closed on the action, fail-soft on its log).
+    }
   }
 
   /** Surface committed-intent-with-no-result (possible partial actions) for human review (§I3). */

@@ -7,7 +7,7 @@ import { createDefaultToolRegistry, InMemoryToolRegistry } from '../tool-registr
 import { PermissionEngine } from '../permission-engine/permission-engine.js';
 import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 import { InMemoryKillSwitch } from '../kill-switch/kill-switch.js';
-import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent } from '../audit-engine/sequencer.js';
+import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../audit-engine/sequencer.js';
 
 // Draft/Planning tools (Phase 8.2, DRAFT_ONLY) — pure-logic. Guard DECISIONS made by REAL engines; the
 // sequencer is a recording double. The CORE proof: drafting is INERT — it changes no store/log and records
@@ -17,6 +17,7 @@ class FakeSequencer implements AuditedSequencerPort {
   intents: string[] = []; results: number[] = []; refusals: { tool: string }[] = [];
   private seq = 0;
   constructor(private readonly authorizer: Authorizer) {}
+  async recordRefusal(req: RefusalRequest): Promise<void> { this.refusals.push({ tool: req.tool.name }); }
   async run<T>(req: SequencerRequest, execute: ExecuteFn<T>): Promise<SequencerOutcome<T>> {
     const decision = await this.authorizer.authorize({ human_actor: req.principal, organization_id: req.organization_id, tool: req.tool, environment: req.environment, connector: req.session.connector_id });
     if (decision.decision !== 'ALLOW') { this.refusals.push({ tool: req.tool.name }); return { status: 'refused', stage: 'authorize', reason: decision.reason ?? decision.decision }; }

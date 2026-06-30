@@ -8,7 +8,7 @@ import { createDefaultToolRegistry, InMemoryToolRegistry } from '../tool-registr
 import { PermissionEngine } from '../permission-engine/permission-engine.js';
 import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 import { InMemoryKillSwitch } from '../kill-switch/kill-switch.js';
-import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent } from '../audit-engine/sequencer.js';
+import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../audit-engine/sequencer.js';
 
 // MCP Bridge (Module 1) — pure-logic. The guard DECISIONS are made by the REAL engines: the Tool Registry
 // (fail-closed lookup), the real PermissionEngine (deny-by-default authorization) consulting the real
@@ -23,6 +23,7 @@ class FakeSequencer implements AuditedSequencerPort {
   refusals: { tool: string; reason?: string }[] = [];
   private seq = 0;
   constructor(private readonly authorizer: Authorizer) {}
+  async recordRefusal(req: RefusalRequest): Promise<void> { this.refusals.push({ tool: req.tool.name, reason: req.reason }); }
   async run<T>(req: SequencerRequest, execute: ExecuteFn<T>): Promise<SequencerOutcome<T>> {
     // authorize FIRST (real PermissionEngine + KillSwitch) — exactly as the real sequencer does.
     const decision = await this.authorizer.authorize({
@@ -112,6 +113,7 @@ describe('MCP Bridge — fail-closed via the Tool Registry', () => {
     if (out.status === 'refused') expect(out.stage).toBe('registry');
     expect(source.calls).toBe(0);
     expect(seq.intents).toHaveLength(0);
+    expect(seq.refusals).toHaveLength(1); // OPEN_ITEM #1: a pre-sequencer (registry) refusal is now audited too
   });
 });
 

@@ -76,15 +76,18 @@ describe('External tools — committed + blast-radius audited (real PostgreSQL)'
   });
 });
 
-describe('External tools — no approval leaves store + audit + external world untouched (real PostgreSQL)', () => {
-  it('no token ⇒ STOP_FOR_APPROVAL; zero external calls, no audit', async () => {
+describe('External tools — no approval leaves store + external world untouched; attempt audited (real PostgreSQL)', () => {
+  it('no token ⇒ STOP_FOR_APPROVAL; zero external calls, the denied attempt IS audited (OPEN_ITEM #1)', async () => {
     const ORG = `orgX-${Date.now()}-b`;
     const { bridge, externals, sink } = make();
     const t: ExternalTarget = { system: 'email', targetId: 'a@x.com', effect: 'email a@x.com subject hi', reversible: 'no' };
     const out = await bridge.externalActionWithTool('send_email', actor(ORG), { target: t });
     expect(out.status).toBe('STOP_FOR_APPROVAL');
     expect(externals.calls).toHaveLength(0);
-    expect(await sink.readEntries(ORG)).toHaveLength(0);
+    const entries = await sink.readEntries(ORG);
+    expect(kinds(entries, 'intent')).toBe(0);   // external port never reached — no intent
+    expect(kinds(entries, 'result')).toBe(0);
+    expect(kinds(entries, 'refusal')).toBe(1);  // ...but the denied attempt is recorded as a distinct refusal
   });
 });
 

@@ -14,7 +14,8 @@ import { ApprovalGate, type ActionDescriptor } from '../approval-gate/approval-g
 
 // Approval-gated write tools — end-to-end against REAL PostgreSQL with the REAL guard stack. Proves the
 // mutation is bracketed by write-ahead audit (intent before, result after), that no-approval leaves the
-// store untouched with no audit, and that kill beats a valid approval — no mocks on the guard path.
+// store untouched (the denied attempt recorded as a refusal-audit — OPEN_ITEM #1), and that kill beats a valid
+// approval — no mocks on the guard path.
 
 const cfg = { host: process.env.PGHOST ?? '127.0.0.1', port: Number(process.env.PGPORT ?? 55432), database: process.env.PGDATABASE ?? 'ece_audit_test' };
 const appPool = new Pool({ ...cfg, user: 'ece_app' });
@@ -69,14 +70,17 @@ describe('Write tools — approved write commits once, audit-bracketed (real Pos
   });
 });
 
-describe('Write tools — no approval leaves the store + audit untouched (real PostgreSQL)', () => {
-  it('a write with no token ⇒ STOP_FOR_APPROVAL, nothing written, no audit intent', async () => {
+describe('Write tools — no approval leaves the store untouched, refusal audited (real PostgreSQL)', () => {
+  it('a write with no token ⇒ STOP_FOR_APPROVAL, nothing written, the denied attempt IS audited (OPEN_ITEM #1)', async () => {
     const ORG = `orgW-${Date.now()}-b`;
     const { bridge, stores, sink } = make();
     const out = await bridge.writeWithTool('create_open_item', { principal: { user_id: 'op', email: 'op@ece.ae', role: 'operator' }, organization_id: ORG, session: { session_id: 's' }, environment: 'local', via: 'claude' } as BridgeCallContext, { payload: { item: 'x' } });
     expect(out.status).toBe('STOP_FOR_APPROVAL');
     expect(stores.records).toHaveLength(0);
-    expect(await sink.readEntries(ORG)).toHaveLength(0); // write withheld pre-flight; nothing audited
+    const entries = await sink.readEntries(ORG);
+    expect(kinds(entries, 'intent')).toBe(0);   // write withheld pre-flight — no intent (so never an orphan)
+    expect(kinds(entries, 'result')).toBe(0);   // ...and no result
+    expect(kinds(entries, 'refusal')).toBe(1);  // ...but the denied attempt is recorded as a distinct refusal
   });
 });
 

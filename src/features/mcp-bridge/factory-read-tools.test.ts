@@ -5,7 +5,7 @@ import { createDefaultToolRegistry, InMemoryToolRegistry } from '../tool-registr
 import { PermissionEngine } from '../permission-engine/permission-engine.js';
 import { RedactionEngine } from '../redaction-engine/redaction-engine.js';
 import { InMemoryKillSwitch } from '../kill-switch/kill-switch.js';
-import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent } from '../audit-engine/sequencer.js';
+import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../audit-engine/sequencer.js';
 
 // Factory Read Tools (Phase 8.1, Part B) — pure-logic. Guard DECISIONS made by REAL engines (Tool Registry,
 // PermissionEngine + KillSwitch, RedactionEngine). The sequencer is a test double that wraps the real
@@ -15,6 +15,7 @@ class FakeSequencer implements AuditedSequencerPort {
   intents: string[] = []; results: number[] = []; refusals: { tool: string; reason?: string }[] = [];
   private seq = 0;
   constructor(private readonly authorizer: Authorizer) {}
+  async recordRefusal(req: RefusalRequest): Promise<void> { this.refusals.push({ tool: req.tool.name, reason: req.reason }); }
   async run<T>(req: SequencerRequest, execute: ExecuteFn<T>): Promise<SequencerOutcome<T>> {
     const decision = await this.authorizer.authorize({ human_actor: req.principal, organization_id: req.organization_id, tool: req.tool, environment: req.environment, connector: req.session.connector_id });
     if (decision.decision !== 'ALLOW') {

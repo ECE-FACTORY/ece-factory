@@ -23,8 +23,8 @@
 // engines, the read model, and the factory read ports are injected. Packaging target: the `ece-mcp-bridge` repo.
 
 import type { ToolRegistryReader, ToolDefinition } from '../tool-registry/tool-registry.js';
-import type { SequencerRequest, SequencerOutcome, ExecuteFn } from '../audit-engine/sequencer.js';
-import type { HumanActor, SessionInfo, Environment } from '../audit-engine/schema.js';
+import type { SequencerRequest, SequencerOutcome, ExecuteFn, RefusalRequest } from '../audit-engine/sequencer.js';
+import type { HumanActor, SessionInfo, Environment, ToolInfo } from '../audit-engine/schema.js';
 import { ClassDispatcher, DRAFT_STATUS, canonicalPayload, type ConsumedApproval, type ApprovalGatePort, type ApprovalBinding } from './tool-classes.js';
 import { classifyRegisteredTool, FACTORY_READ_TOOLS, type FactoryReadTool, type FactoryReadPorts, type FactoryReadParams } from './factory-read-tools.js';
 import { DRAFT_TOOLS, type DraftTool, type DraftPorts, type DraftParams } from './draft-tools.js';
@@ -67,6 +67,12 @@ export interface ClientReadModel {
 /** The write-ahead sequencer, injected as a port. `WriteAheadSequencer` satisfies this structurally. */
 export interface AuditedSequencerPort {
   run<T>(req: SequencerRequest, execute: ExecuteFn<T>): Promise<SequencerOutcome<T>>;
+  /**
+   * Record a denied attempt the bridge decides BEFORE `run` (missing approval, FORBIDDEN, encapsulated,
+   * hardening, registry/tier miss). REQUIRED on the port by design: it must be structurally impossible to wire
+   * a bridge whose pre-sequencer refusals cannot be audited (OPEN_ITEM #1).
+   */
+  recordRefusal(req: RefusalRequest): Promise<void>;
 }
 
 /** The redactor port. `RedactionEngine` satisfies this structurally (deny-by-default allowlist). */
@@ -173,6 +179,46 @@ export class McpBridge {
     this.dispatcher = new ClassDispatcher(opts.approvalGate);
   }
 
+  // ── OPEN_ITEM #1 — refusal-audit choke point ────────────────────────────────────────────────────────────
+  // A denied attempt the bridge decides BEFORE the write-ahead sequencer runs (a missing approval ⇒
+  // STOP_FOR_APPROVAL; a FORBIDDEN / encapsulated / hardening / registry / wrong-tier refusal) commits no
+  // intent and was therefore previously invisible to audit ("who tried what they weren't allowed to"). Every
+  // public entrypoint routes its outcome through here so such a denial is recorded as a distinct refusal entry.
+  // Refusals the SEQUENCER owns (authorize/kill, validate, intent-commit, execute) are already audited inside
+  // `run`, so their stages are skipped here — no double entry. Fail-soft: see `recordRefusal`.
+  private static readonly BRIDGE_REFUSAL_STAGES: ReadonlySet<BridgeRefusalStage> =
+    new Set<BridgeRefusalStage>(['registry', 'read-only-gate', 'forbidden', 'hardening', 'encapsulated']);
+
+  private async auditBridgeRefusal<O extends { status: string }>(name: string, ctx: BridgeCallContext, outcome: O): Promise<O> {
+    if (outcome.status === 'STOP_FOR_APPROVAL') {
+      await this.sequencer.recordRefusal(this.refusalRequest(name, ctx, 'approval', 'STOP_FOR_APPROVAL', (outcome as { reason?: string }).reason));
+    } else if (outcome.status === 'refused') {
+      const stage = (outcome as unknown as { stage: BridgeRefusalStage }).stage;
+      if (McpBridge.BRIDGE_REFUSAL_STAGES.has(stage)) {
+        await this.sequencer.recordRefusal(this.refusalRequest(name, ctx, stage, 'REFUSE', (outcome as { reason?: string }).reason));
+      }
+    }
+    return outcome;
+  }
+
+  private refusalRequest(name: string, ctx: BridgeCallContext, stage: string, decision: 'REFUSE' | 'STOP_FOR_APPROVAL', reason?: string): RefusalRequest {
+    // Best-effort tool classification: a registered tool carries its class; an unregistered/misconfigured one
+    // is recorded by name alone (the attempt is still audited).
+    const def = this.registry.has(name) ? this.registry.require(name) : undefined;
+    const tool: ToolInfo = def ? { name, classification: def.classification, permission_level: def.permissionLevel } : { name };
+    return {
+      principal: ctx.principal, // the real human — never "claude"
+      organization_id: ctx.organization_id,
+      session: ctx.session,
+      tool,
+      environment: ctx.environment,
+      via: ctx.via,
+      stage,
+      decision,
+      reason,
+    };
+  }
+
   /** The READ_ONLY tools the bridge exposes (those registered) — fail-closed via the registry. */
   listTools(): ToolDefinition[] {
     return EXPOSED_TOOLS.filter((n) => this.registry.has(n)).map((n) => this.registry.require(n));
@@ -180,6 +226,9 @@ export class McpBridge {
 
   /** Phase 8.0 — the system-of-record read tool. */
   async searchClients(input: SearchClientsInput, ctx: BridgeCallContext): Promise<BridgeOutcome> {
+    return this.auditBridgeRefusal('search_clients', ctx, await this.searchClientsImpl(input, ctx));
+  }
+  private async searchClientsImpl(input: SearchClientsInput, ctx: BridgeCallContext): Promise<BridgeOutcome> {
     const g = await this.guardedDispatch<ClientRecord[]>(
       'READ_ONLY', 'search_clients', ctx,
       () => this.source.searchClients(input),
@@ -191,6 +240,9 @@ export class McpBridge {
 
   /** Phase 8.1 — a factory/governance-state read tool. Same full guard stack; no internal exemption. */
   async readFactoryState(name: FactoryReadTool, ctx: BridgeCallContext, params: FactoryReadParams = {}): Promise<FactoryReadOutcome> {
+    return this.auditBridgeRefusal(name, ctx, await this.readFactoryStateImpl(name, ctx, params));
+  }
+  private async readFactoryStateImpl(name: FactoryReadTool, ctx: BridgeCallContext, params: FactoryReadParams = {}): Promise<FactoryReadOutcome> {
     if (!this.factoryPorts) return { status: 'refused', tool: name, stage: 'registry', reason: 'factory read ports not configured' };
     const summary: Record<string, unknown> = params.ref ? { tool: name, ref: params.ref } : { tool: name };
     const g = await this.guardedDispatch<unknown>('READ_ONLY', name, ctx, () => this.readFromPort(name, params), summary);
@@ -203,6 +255,9 @@ export class McpBridge {
    * always DRAFT-AWAITING-HUMAN-REVIEW. Same full guard stack; the draft handler has no write/mutation path.
    */
   async draftWithTool(name: DraftTool, ctx: BridgeCallContext, params: DraftParams = {}): Promise<DraftOutcome> {
+    return this.auditBridgeRefusal(name, ctx, await this.draftWithToolImpl(name, ctx, params));
+  }
+  private async draftWithToolImpl(name: DraftTool, ctx: BridgeCallContext, params: DraftParams = {}): Promise<DraftOutcome> {
     if (!this.draftPorts) return { status: 'refused', tool: name, stage: 'registry', reason: 'draft ports not configured' };
     const summary: Record<string, unknown> = params.ref ? { tool: name, ref: params.ref } : { tool: name };
     const g = await this.guardedDispatch<unknown>('DRAFT_ONLY', name, ctx, () => this.produceDraft(name, params), summary);
@@ -217,6 +272,9 @@ export class McpBridge {
    * written). The mutation runs inside the committed audit callback (intent before, result after).
    */
   async writeWithTool(name: WriteTool, ctx: BridgeCallContext, params: WriteParams = {}): Promise<WriteOutcome> {
+    return this.auditBridgeRefusal(name, ctx, await this.writeWithToolImpl(name, ctx, params));
+  }
+  private async writeWithToolImpl(name: WriteTool, ctx: BridgeCallContext, params: WriteParams = {}): Promise<WriteOutcome> {
     if (!this.writeStores) return { status: 'refused', tool: name, stage: 'registry', reason: 'write stores not configured' };
     // 1. TOOL REGISTRY — fail-closed.
     let def: ToolDefinition;
@@ -251,6 +309,9 @@ export class McpBridge {
    * A FORBIDDEN tool is refused before any approval. Commits ONLY via the consumed-token + hardening gauntlet.
    */
   async externalActionWithTool(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.auditBridgeRefusal(name, ctx, await this.externalActionWithToolImpl(name, ctx, params));
+  }
+  private async externalActionWithToolImpl(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
     // SOLE-AUTHORITY (8.8b): open_pull_request is NOT reachable via the generic external path — it is
     // capability-encapsulated behind the PR Engine (use `openPullRequest(capability, …)`). Closes the bypass.
     if (name === 'open_pull_request') {
@@ -270,7 +331,7 @@ export class McpBridge {
    * capability, so no other module can open a PR. The gauntlet below is the UNCHANGED full Phase 8.4 path.
    */
   async openPullRequest(_capability: OpenPrCapability, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
-    return this.runExternalAction('open_pull_request', ctx, params);
+    return this.auditBridgeRefusal('open_pull_request', ctx, await this.runExternalAction('open_pull_request', ctx, params));
   }
 
   private async runExternalAction(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
