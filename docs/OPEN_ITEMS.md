@@ -4,7 +4,7 @@
 
 | # | Item | Status | Required action | Risk if unresolved |
 |---|------|--------|-----------------|--------------------|
-| 1 | **Refusal-audit path** — denied attempts (authorize REFUSE) are not yet logged; authorize runs before intent/read-log commit. | **Locked for Phase 3.5** | Add a dedicated refusal-audit record ("who tried what they weren't allowed to, and when"), separate from the success path. | Attempted-but-denied access is invisible to audit until built. |
+| 1 | **Refusal-audit path** — denied attempts (authorize REFUSE) are not yet logged; authorize runs before intent/read-log commit. | **RESOLVED (commit `0f6bbce`)** | Add a dedicated refusal-audit record ("who tried what they weren't allowed to, and when"), separate from the success path. | Resolved: Bridge-level MCP refusals are now recorded as chained `audit_refusal` entries. Verified by focused bridge unit tests, typecheck, real PostgreSQL bridge/audit DB tests, hash-chain tests, and deploy verify. |
 | 2 | **Permission Engine (Module 22)** — `Authorizer` is a stub (`AllowAllAuthorizer`); real authorization is a later wave. | Deferred (later wave) | Implement Module 22 behind the existing `Authorizer` seam. | All authorized actions are ALLOW until then. |
 | 3 | **Timestamp tamper-evidence** — `ts` and the DB pk are excluded from the hashed content (round-trip stability). | Deferred | Hash an app-generated canonical `ts` field. | `ts` tampering not detected by the chain (content/order/linkage are). |
 | 4 | **Orphan grace window** — `reconcileOrphans` defaults to 0s; in-flight actions could be flagged. | Open | Use a production grace window when scheduling reconciliation. | False-positive orphan flags if run with 0s in production. |
