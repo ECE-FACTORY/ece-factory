@@ -83,7 +83,19 @@ export interface BridgeCallContext {
   via?: string;
 }
 
-export type BridgeRefusalStage = 'registry' | 'read-only-gate' | 'authorize' | 'validate' | 'intent-commit' | 'execute' | 'forbidden' | 'hardening';
+export type BridgeRefusalStage = 'registry' | 'read-only-gate' | 'authorize' | 'validate' | 'intent-commit' | 'execute' | 'forbidden' | 'hardening' | 'encapsulated';
+
+// ── PR-open capability (Phase 8.8b) — sole-authority enforcement, BY CONSTRUCTION ───────────────────────
+// `open_pull_request` is reachable ONLY through `bridge.openPullRequest(cap, …)`, which requires this branded
+// capability. The symbol is module-private, so an `OpenPrCapability` cannot be constructed or forged outside
+// this module (exactly like the approval token's unforgeability). The capability is minted only by
+// `grantPrOpenCapability()`; the PR Engine is its sole holder. The generic `externalActionWithTool` REFUSES
+// open_pull_request — closing any bypass. This is an encapsulation/visibility seam, NOT a new gate: the
+// gauntlet `openPullRequest` runs is the unchanged full Phase 8.4 path.
+declare const OPEN_PR_CAP: unique symbol;
+export interface OpenPrCapability { readonly [OPEN_PR_CAP]: true }
+const OPEN_PR_BRAND: typeof OPEN_PR_CAP = Symbol('openPrCapability') as unknown as typeof OPEN_PR_CAP;
+function mintOpenPrCapability(): OpenPrCapability { return { [OPEN_PR_BRAND]: true } as OpenPrCapability; }
 
 /** Outcome of a system-of-record read — data, or a refusal. No write variant exists. */
 export type BridgeOutcome =
@@ -239,6 +251,29 @@ export class McpBridge {
    * A FORBIDDEN tool is refused before any approval. Commits ONLY via the consumed-token + hardening gauntlet.
    */
   async externalActionWithTool(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    // SOLE-AUTHORITY (8.8b): open_pull_request is NOT reachable via the generic external path — it is
+    // capability-encapsulated behind the PR Engine (use `openPullRequest(capability, …)`). Closes the bypass.
+    if (name === 'open_pull_request') {
+      return { status: 'refused', tool: name, stage: 'encapsulated', reason: 'open_pull_request is reachable only through the PR Engine (capability-encapsulated); the generic external path cannot assemble it' };
+    }
+    return this.runExternalAction(name, ctx, params);
+  }
+
+  /** Mint the single, unforgeable PR-open capability. The PR Engine is the sole holder (composition root). */
+  grantPrOpenCapability(): OpenPrCapability {
+    return mintOpenPrCapability();
+  }
+
+  /**
+   * Phase 8.8b — the ONLY path that assembles + runs the `open_pull_request` external action. Holding the
+   * unforgeable `OpenPrCapability` IS the authority to assemble it; no other module can construct the
+   * capability, so no other module can open a PR. The gauntlet below is the UNCHANGED full Phase 8.4 path.
+   */
+  async openPullRequest(_capability: OpenPrCapability, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runExternalAction('open_pull_request', ctx, params);
+  }
+
+  private async runExternalAction(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
     if (!this.externalSystems) return { status: 'refused', tool: name, stage: 'registry', reason: 'external systems not configured' };
     // 1. TOOL REGISTRY — fail-closed.
     let def: ToolDefinition;

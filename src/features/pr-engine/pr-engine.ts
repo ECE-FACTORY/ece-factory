@@ -18,14 +18,19 @@
 // STANDALONE-PACKAGEABLE: the bridge's draft + external ports and the repo lookup are injected; every
 // cross-engine reference is `import type` (zero runtime coupling).
 
-import type { BridgeCallContext, DraftOutcome, ExternalOutcome } from '../mcp-bridge/mcp-bridge.js';
+import type { BridgeCallContext, DraftOutcome, ExternalOutcome, OpenPrCapability } from '../mcp-bridge/mcp-bridge.js';
 import type { DraftTool, DraftParams } from '../mcp-bridge/draft-tools.js';
-import type { ExternalTool, ExternalParams, ExternalTarget } from '../mcp-bridge/external-tools.js';
+import type { ExternalParams, ExternalTarget } from '../mcp-bridge/external-tools.js';
 
-/** The slice of the bridge the PR Engine composes — DRAFT_ONLY + external ONLY. `McpBridge` satisfies it. */
+/**
+ * The slice of the bridge the PR Engine composes — DRAFT_ONLY + the capability-gated PR-open path. `McpBridge`
+ * satisfies it. Note: there is NO generic external method here, and `openPullRequest` REQUIRES the unforgeable
+ * `OpenPrCapability` — so only a capability holder (this engine) can open a PR (8.8b: sole authority).
+ */
 export interface PrEngineBridge {
   draftWithTool(name: DraftTool, ctx: BridgeCallContext, params?: DraftParams): Promise<DraftOutcome>;
-  externalActionWithTool(name: ExternalTool, ctx: BridgeCallContext, params?: ExternalParams): Promise<ExternalOutcome>;
+  grantPrOpenCapability(): OpenPrCapability;
+  openPullRequest(capability: OpenPrCapability, ctx: BridgeCallContext, params?: ExternalParams): Promise<ExternalOutcome>;
 }
 
 /** Injected: is this a real / registered repo target? (Consumes the repo registry by use — deny-by-default.) */
@@ -61,12 +66,23 @@ export type PrDraftOutcome =
   | { status: 'PR-DRAFT-AWAITING-HUMAN-REVIEW'; proposedPr: ProposedPr; auditSeq?: number }
   | { status: 'refused'; stage: 'draft'; reason: string };
 
-export interface PrOpenInput {
+/**
+ * The typed seam other modules consume. A consumer assembles a `PrRequest` and hands it to a `PrOpener`
+ * (the PR Engine) — it has NO way to call open_pull_request itself (no bridge, no capability).
+ */
+export interface PrRequest {
   target: PrTarget;
   title: string;
   body: string;
   /** The Approval Gate action id whose single-use, specific-target human approval authorizes opening THIS PR. */
   approvalActionId?: string;
+}
+/** @deprecated alias for PrRequest (the public open seam). */
+export type PrOpenInput = PrRequest;
+
+/** The narrow surface other modules receive — they can hand a PrRequest to openPr; nothing else. */
+export interface PrOpener {
+  openPr(request: PrRequest, ctx: BridgeCallContext): Promise<PrOpenOutcome>;
 }
 
 /**
@@ -78,11 +94,16 @@ export type PrOpenOutcome =
   | { status: 'STOP_FOR_APPROVAL'; reason: string }
   | { status: 'refused'; stage: 'open'; reason: string };
 
-export class PrEngine {
+export class PrEngine implements PrOpener {
+  /** The sole-held, unforgeable PR-open capability — granted once at construction. No other module has one. */
+  private readonly prOpenCapability: OpenPrCapability;
+
   constructor(
     private readonly bridge: PrEngineBridge,
     private readonly repoLookup: RepoLookup,
-  ) {}
+  ) {
+    this.prOpenCapability = bridge.grantPrOpenCapability();
+  }
 
   /** DRAFT stage (DRAFT_ONLY) — assemble + route through the bridge's draft path. Opens nothing. */
   async draftPr(input: PrDraftInput, ctx: BridgeCallContext): Promise<PrDraftOutcome> {
@@ -99,8 +120,8 @@ export class PrEngine {
     return { status: 'PR-DRAFT-AWAITING-HUMAN-REVIEW', proposedPr: proposed, auditSeq: d.auditSeq };
   }
 
-  /** OPEN stage (external) — route through the bridge's open_pull_request under the full 8.4 gauntlet. */
-  async openPr(input: PrOpenInput, ctx: BridgeCallContext): Promise<PrOpenOutcome> {
+  /** OPEN stage (external) — route through the bridge's capability-gated open_pull_request (full 8.4 gauntlet). */
+  async openPr(input: PrRequest, ctx: BridgeCallContext): Promise<PrOpenOutcome> {
     const v = await this.verifyTarget(input.target);
     if (!v.ok) return { status: 'refused', stage: 'open', reason: v.reason };
 
@@ -111,8 +132,9 @@ export class PrEngine {
       effect: `open PR on ${input.target.repo}: ${input.target.branch} -> ${input.target.base} — ${input.title}`,
       reversible: 'soft-only',
     };
-    // ONE target per approval (no bulk by construction). The bridge applies the full 8.4 gauntlet.
-    const out = await this.bridge.externalActionWithTool('open_pull_request', ctx, {
+    // ONE target per approval (no bulk by construction). Requires the unforgeable PR-open capability — the
+    // ONLY way to reach open_pull_request. The bridge applies the full 8.4 gauntlet.
+    const out = await this.bridge.openPullRequest(this.prOpenCapability, ctx, {
       approvalActionId: input.approvalActionId,
       target,
       payload: { title: input.title, body: input.body },

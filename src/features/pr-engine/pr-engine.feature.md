@@ -11,7 +11,15 @@ A pull-request workflow **over** the one guarded door. It composes existing tier
 - **open (external, APPROVAL_REQUIRED_WRITE):** route through the bridge's `open_pull_request` (Tier 4) under the **full 8.4 gauntlet** — specific-target binding (exact repo+branch+base), single-use human token, no-bulk (one PR per approval), production gate, blast-radius audit, kill-beats-approval, self-approval-rejected. `PR-OPENED` is reachable **only** from the bridge's `EXTERNAL-ACTION-COMMITTED`.
 
 ## Inherits the gates — no re-implementation (the core)
-The only way the engine opens a PR is `bridge.externalActionWithTool('open_pull_request', …)`. There is **no parallel approval/token/external path**. Opening with no / wrong-target / bulk approval ⇒ refused, and the (fake) `open_pull_request` port is **never called**. The open stage's safety is exactly the 8.4 gauntlet, reached through the bridge.
+The only way the engine opens a PR is the bridge's capability-gated `openPullRequest(capability, …)` (8.8b). There is **no parallel approval/token/external path**. Opening with no / wrong-target / bulk approval ⇒ refused, and the (fake) `open_pull_request` port is **never called**. The open stage's safety is exactly the 8.4 gauntlet, reached through the bridge — `openPullRequest` runs the identical full Phase 8.4 path (this is encapsulation, not a new gate).
+
+## Sole authority — STRUCTURAL (Phase 8.8b)
+The PR Engine is the **sole** assembler/opener of pull requests, **by construction**:
+- `open_pull_request` is reachable **only** through `bridge.openPullRequest(capability, …)`, which **requires** an unforgeable branded `OpenPrCapability` (module-private `unique symbol` in the bridge — uncostructible/unforgeable outside it, exactly like the approval token).
+- the capability is minted only by `bridge.grantPrOpenCapability()`; the PR Engine obtains it once at construction and is its **sole holder**.
+- the generic `externalActionWithTool('open_pull_request', …)` **refuses** (stage `encapsulated`) — closing the bypass.
+- consumers receive the typed `PrOpener` + `PrRequest` seam only; they have no bridge, no capability, and no way to call `open_pull_request` themselves.
+- **Boundary proof:** exactly one production module assembles/opens a PR (`pr-engine.ts`); the bridge merely *defines* the capability seam.
 
 ## External stays on fakes (this phase)
 `open_pull_request` is wired to the injected **fake** external system (records what would happen; **zero real calls** on every path). The PR Engine is fully built and tested against the fake; **real GitHub wiring waits for the separately-gated external-tier live wiring.**
