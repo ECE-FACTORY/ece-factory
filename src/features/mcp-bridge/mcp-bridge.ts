@@ -91,17 +91,30 @@ export interface BridgeCallContext {
 
 export type BridgeRefusalStage = 'registry' | 'read-only-gate' | 'authorize' | 'validate' | 'intent-commit' | 'execute' | 'forbidden' | 'hardening' | 'encapsulated';
 
-// ── PR-open capability (Phase 8.8b) — sole-authority enforcement, BY CONSTRUCTION ───────────────────────
-// `open_pull_request` is reachable ONLY through `bridge.openPullRequest(cap, …)`, which requires this branded
-// capability. The symbol is module-private, so an `OpenPrCapability` cannot be constructed or forged outside
-// this module (exactly like the approval token's unforgeability). The capability is minted only by
-// `grantPrOpenCapability()`; the PR Engine is its sole holder. The generic `externalActionWithTool` REFUSES
-// open_pull_request — closing any bypass. This is an encapsulation/visibility seam, NOT a new gate: the
-// gauntlet `openPullRequest` runs is the unchanged full Phase 8.4 path.
-declare const OPEN_PR_CAP: unique symbol;
-export interface OpenPrCapability { readonly [OPEN_PR_CAP]: true }
-const OPEN_PR_BRAND: typeof OPEN_PR_CAP = Symbol('openPrCapability') as unknown as typeof OPEN_PR_CAP;
-function mintOpenPrCapability(): OpenPrCapability { return { [OPEN_PR_BRAND]: true } as OpenPrCapability; }
+// ── External-action sole-authority capabilities (Phase 8.8b → generalized in 9.3 / OPEN_ITEM #9) ─────────
+// EVERY external action is reachable ONLY through its capability-gated bridge method (createGithubRepo /
+// openPullRequest / createTicket / updateCrmRecord / sendEmail / deployPackage). Each REQUIRES an
+// unforgeable, PER-ACTION capability:
+//   • UNFORGEABLE — the brand key is a module-private `unique symbol`; an `ExternalCapability` cannot be
+//     constructed or even named outside this module (exactly like the approval token's unforgeability).
+//   • PER-ACTION — the phantom tool-name parameter `N` makes the six capability types MUTUALLY
+//     non-assignable, so a `send_email` capability cannot be passed where `create_ticket` is required
+//     (binding proven at the TYPE level; also re-checked at RUNTIME by the capability's brand value).
+// The generic `externalActionWithTool` REFUSES all six (stage `encapsulated`) — closing the "any module
+// holding the bridge could call them" bypass. This is an encapsulation/visibility seam, NOT a new gate: each
+// capability method runs the UNCHANGED full Phase 8.4 gauntlet (`runExternalAction`). Sole holders: the PR
+// Engine (open_pull_request) and the five per-action external gateways, each granted its single capability at
+// the composition root — exactly one owner per action (8.8b's structural sole authority, now for all 6).
+declare const EXTERNAL_CAP: unique symbol;
+export interface ExternalCapability<N extends ExternalTool> { readonly [EXTERNAL_CAP]: N }
+const EXTERNAL_CAP_BRAND: typeof EXTERNAL_CAP = Symbol('externalCapability') as unknown as typeof EXTERNAL_CAP;
+function mintExternalCapability<N extends ExternalTool>(name: N): ExternalCapability<N> {
+  return { [EXTERNAL_CAP_BRAND]: name } as ExternalCapability<N>;
+}
+/** All six external actions are capability-encapsulated — the generic path can assemble NONE of them. */
+const ENCAPSULATED_EXTERNAL_TOOLS: ReadonlySet<ExternalTool> = new Set(EXTERNAL_TOOLS);
+/** @deprecated Phase 8.8b name retained — the PR-open capability is `ExternalCapability<'open_pull_request'>`. */
+export type OpenPrCapability = ExternalCapability<'open_pull_request'>;
 
 /** Outcome of a system-of-record read — data, or a refusal. No write variant exists. */
 export type BridgeOutcome =
@@ -312,26 +325,64 @@ export class McpBridge {
     return this.auditBridgeRefusal(name, ctx, await this.externalActionWithToolImpl(name, ctx, params));
   }
   private async externalActionWithToolImpl(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
-    // SOLE-AUTHORITY (8.8b): open_pull_request is NOT reachable via the generic external path — it is
-    // capability-encapsulated behind the PR Engine (use `openPullRequest(capability, …)`). Closes the bypass.
-    if (name === 'open_pull_request') {
-      return { status: 'refused', tool: name, stage: 'encapsulated', reason: 'open_pull_request is reachable only through the PR Engine (capability-encapsulated); the generic external path cannot assemble it' };
+    // SOLE-AUTHORITY (8.8b generalized in 9.3 / #9): EVERY external action is capability-encapsulated behind
+    // its owning module (PR Engine / per-action gateway). The generic path can assemble NONE of them — use the
+    // capability-gated method (createGithubRepo / openPullRequest / createTicket / updateCrmRecord / sendEmail
+    // / deployPackage). This closes the bypass for all six.
+    if (ENCAPSULATED_EXTERNAL_TOOLS.has(name)) {
+      return { status: 'refused', tool: name, stage: 'encapsulated', reason: `"${name}" is reachable only through its capability-holding owner (encapsulated); the generic external path cannot assemble it` };
     }
+    // A non-external name routed here (e.g. a FORBIDDEN tool) still fails closed inside runExternalAction.
     return this.runExternalAction(name, ctx, params);
   }
 
-  /** Mint the single, unforgeable PR-open capability. The PR Engine is the sole holder (composition root). */
-  grantPrOpenCapability(): OpenPrCapability {
-    return mintOpenPrCapability();
+  // ── Capability minters — one per external action. Each mints that action's single, unforgeable, PER-ACTION
+  //    capability. The sole holder is the action's owning module (PR Engine / per-action gateway), to which it
+  //    is granted at the composition root. (8.8b's `grantPrOpenCapability` generalized to all six.) ──
+  grantCreateGithubRepoCapability(): ExternalCapability<'create_github_repo'> { return mintExternalCapability('create_github_repo'); }
+  grantOpenPullRequestCapability(): ExternalCapability<'open_pull_request'> { return mintExternalCapability('open_pull_request'); }
+  grantCreateTicketCapability(): ExternalCapability<'create_ticket'> { return mintExternalCapability('create_ticket'); }
+  grantUpdateCrmRecordCapability(): ExternalCapability<'update_crm_record'> { return mintExternalCapability('update_crm_record'); }
+  grantSendEmailCapability(): ExternalCapability<'send_email'> { return mintExternalCapability('send_email'); }
+  grantDeployPackageCapability(): ExternalCapability<'deploy_package'> { return mintExternalCapability('deploy_package'); }
+  /** @deprecated Phase 8.8b name retained for the PR Engine — aliases `grantOpenPullRequestCapability`. */
+  grantPrOpenCapability(): OpenPrCapability { return mintExternalCapability('open_pull_request'); }
+
+  // ── Capability-gated external actions — the ONLY path that assembles + runs each external action. Holding
+  //    the unforgeable, per-action capability IS the authority to assemble it; no other module can construct
+  //    the capability, so no other module can drive that action. Each runs the UNCHANGED full 8.4 gauntlet. ──
+  createGithubRepo(capability: ExternalCapability<'create_github_repo'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('create_github_repo', capability, ctx, params);
+  }
+  /** Phase 8.8b — the PR Engine's sole open path. The gauntlet is the UNCHANGED full Phase 8.4 path. */
+  openPullRequest(capability: OpenPrCapability, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('open_pull_request', capability, ctx, params);
+  }
+  createTicket(capability: ExternalCapability<'create_ticket'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('create_ticket', capability, ctx, params);
+  }
+  updateCrmRecord(capability: ExternalCapability<'update_crm_record'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('update_crm_record', capability, ctx, params);
+  }
+  sendEmail(capability: ExternalCapability<'send_email'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('send_email', capability, ctx, params);
+  }
+  deployPackage(capability: ExternalCapability<'deploy_package'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('deploy_package', capability, ctx, params);
   }
 
   /**
-   * Phase 8.8b — the ONLY path that assembles + runs the `open_pull_request` external action. Holding the
-   * unforgeable `OpenPrCapability` IS the authority to assemble it; no other module can construct the
-   * capability, so no other module can open a PR. The gauntlet below is the UNCHANGED full Phase 8.4 path.
+   * The shared sole-authority runner. UNREACHABLE without a capability — the public methods require it as a
+   * typed argument and the constructor (`mintExternalCapability`) is module-private. Defense-in-depth: the
+   * capability's RUNTIME brand must match the action — the type system already binds them per-action; this
+   * also rejects a deliberately cast/mis-minted capability (one action's capability cannot drive another).
+   * The gauntlet it then runs is the UNCHANGED full Phase 8.4 path (`runExternalAction`).
    */
-  async openPullRequest(_capability: OpenPrCapability, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
-    return this.auditBridgeRefusal('open_pull_request', ctx, await this.runExternalAction('open_pull_request', ctx, params));
+  private async runEncapsulatedExternal<N extends ExternalTool>(name: N, capability: ExternalCapability<N>, ctx: BridgeCallContext, params: ExternalParams): Promise<ExternalOutcome> {
+    if ((capability as unknown as Record<symbol, unknown> | null | undefined)?.[EXTERNAL_CAP_BRAND] !== name) {
+      return this.auditBridgeRefusal(name, ctx, { status: 'refused', tool: name, stage: 'encapsulated', reason: `capability does not authorize "${name}" (per-action binding)` });
+    }
+    return this.auditBridgeRefusal(name, ctx, await this.runExternalAction(name, ctx, params));
   }
 
   private async runExternalAction(name: ExternalTool, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {

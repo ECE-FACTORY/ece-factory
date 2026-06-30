@@ -18,7 +18,8 @@ const { Pool } = pkg;
 import { McpServerCore, type McpServerBridge } from './server-core.js';
 import { LiveFactoryReadPorts, type LiveReadSources } from './live-read-adapters.js';
 import { LiveWriteStores } from './live-write-adapters.js';
-import { buildTierStatusReport, makeDbProbe, type TierStatusReport } from './tier-status.js';
+import { buildTierStatusReport, makeDbProbe, type TierStatusReport, type ExternalAction } from './tier-status.js';
+import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
 import { McpBridge, EXPOSED_READ_TOOLS, EXPOSED_DRAFT_TOOLS, EXPOSED_WRITE_TOOLS, EXPOSED_EXTERNAL_TOOLS } from '../features/mcp-bridge/mcp-bridge.js';
 import { FORBIDDEN_TOOLS } from '../features/mcp-bridge/external-tools.js';
 import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
@@ -26,6 +27,7 @@ import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-to
 import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draft-tools.js';
 import { registerWriteTools } from '../features/mcp-bridge/write-tools.js';
 import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../features/mcp-bridge/external-tools.js';
+import { RepoCreationGateway, TicketGateway, CrmGateway, EmailGateway, DeployGateway } from '../features/external-gateways/external-gateways.js';
 import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
 import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
 import { WriteAheadSequencer } from '../features/audit-engine/sequencer.js';
@@ -50,6 +52,31 @@ function fakeDraftPorts(): DraftPorts {
 function fakeExternalSystems(): ExternalSystems {
   const x = async (): Promise<never> => { throw new Error('external systems are fakes this phase — no live external action'); };
   return { createGithubRepo: x, openPullRequest: x, createTicket: x, updateCrmRecord: x, sendEmail: x, deployPackage: x };
+}
+
+/**
+ * Phase 9.4 — external live wiring, GitHub ONLY. `create_github_repo` may go live behind an explicit operator
+ * opt-in (`ECE_GITHUB_LIVE=1`); the other five external actions STAY ON FAKES. The live adapter throws LOUDLY
+ * if `ECE_GITHUB_TOKEN` is unset — never a silent fake fallback. The gate is UNCHANGED: this only swaps the
+ * adapter the bridge delegates to behind the Phase 8.4 gauntlet + the Phase 9.3 sole-authority capability.
+ * Returns the composite the bridge uses AND the per-action adapter instances (so tier-status reports honestly).
+ */
+function buildExternalWiring(env: NodeJS.ProcessEnv): { externalSystems: ExternalSystems; externalAdapters: Record<ExternalAction, object> } {
+  const fake = fakeExternalSystems();
+  const githubLive = env.ECE_GITHUB_LIVE === '1';
+  // create_github_repo backing: the live adapter (throws loudly if token unset) or the fake. Narrow type — it
+  // owns exactly one action, so it cannot be misused for any other external action.
+  const github: Pick<ExternalSystems, 'createGithubRepo'> = githubLive
+    ? new LiveGitHubRepoAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun: env.ECE_GITHUB_DRYRUN === '1' })
+    : fake;
+  const externalAdapters: Record<ExternalAction, object> = {
+    create_github_repo: github, open_pull_request: fake, create_ticket: fake,
+    update_crm_record: fake, send_email: fake, deploy_package: fake,
+  };
+  // The composite the bridge calls: the five non-github actions stay exactly on the fakes; ONLY
+  // create_github_repo is overridden to route to its (live|fake) adapter. The gate is unchanged.
+  const externalSystems: ExternalSystems = { ...fake, createGithubRepo: (t, p) => github.createGithubRepo(t, p) };
+  return { externalSystems, externalAdapters };
 }
 
 /** Live governance-doc reader — reads the real docs from disk (read-only). */
@@ -103,7 +130,10 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
 }
 
 /** Build the bridge (live reads + fake writes/externals) and the server core. No stdin involved — testable. */
-export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport> } {
+export interface ExternalGateways {
+  repoCreation: RepoCreationGateway; ticket: TicketGateway; crm: CrmGateway; email: EmailGateway; deploy: DeployGateway;
+}
+export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport>; externalGateways: ExternalGateways } {
   const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });          // READ_ONLY tier + audit
   const writePool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgWriteUser }); // internal-write tier (append-INSERT only)
 
@@ -131,13 +161,21 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
   const factoryPorts = new LiveFactoryReadPorts(liveSources); // LIVE reads
   const writeStores = new LiveWriteStores(writePool);         // LIVE internal-write (append-only; token-gated)
   const draftPorts = fakeDraftPorts();                        // drafts on fakes
-  const externalSystems = fakeExternalSystems();              // external on fakes
+  const { externalSystems, externalAdapters } = buildExternalWiring(process.env); // create_github_repo may be LIVE; other 5 fake
 
   const bridge = new McpBridge(
     registry, sequencer, new PostgresClientReadModel(pool), redactor,
     { factoryPorts, writeStores, draftPorts, externalSystems, approvalGate: new BridgeApprovalGate(new ApprovalGate(), cfg.principal.user_id) },
   );
   const core = new McpServerCore(bridge as McpServerBridge, registry);
+  // SOLE AUTHORITY (8.8b generalized, #9): grant each external action's SINGLE capability to exactly one
+  // owning gateway, here at the composition root. No other caller can construct a capability, and the generic
+  // external path refuses every external tool — so each external action has exactly one structural owner.
+  // External stays on fakes this phase (the gateways route to the injected fake `externalSystems`).
+  const externalGateways: ExternalGateways = {
+    repoCreation: new RepoCreationGateway(bridge), ticket: new TicketGateway(bridge), crm: new CrmGateway(bridge),
+    email: new EmailGateway(bridge), deploy: new DeployGateway(bridge),
+  };
   const ctx: BridgeCallContext = {
     principal: cfg.principal, organization_id: cfg.organizationId,
     session: { session_id: `mcp-${cfg.principal.user_id}`, connector_type: 'mcp', source_application: 'claude-code' },
@@ -145,14 +183,14 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
   };
   // Tier-status reporter — derives each tier's backing from the REAL injected objects; read-only DB probe.
   const tierStatus = (): Promise<TierStatusReport> => buildTierStatusReport({
-    factoryPorts, draftPorts, writeStores, externalSystems,
+    factoryPorts, draftPorts, writeStores, externalSystems, externalAdapters,
     readRole: cfg.pgUser, writeRole: cfg.pgWriteUser,
     toolCounts: {
       read_only: EXPOSED_READ_TOOLS.length, draft_only: EXPOSED_DRAFT_TOOLS.length,
       internal_write: EXPOSED_WRITE_TOOLS.length, external: EXPOSED_EXTERNAL_TOOLS.length, forbidden: FORBIDDEN_TOOLS.length,
     },
   }, makeDbProbe(pool));
-  return { core, ctx, pool, writePool, tierStatus };
+  return { core, ctx, pool, writePool, tierStatus, externalGateways };
 }
 
 // ── JSON-RPC 2.0 over stdio (the MCP transport subset Claude Code uses) ──

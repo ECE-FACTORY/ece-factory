@@ -64,7 +64,7 @@ describe('External tools — committed + blast-radius audited (real PostgreSQL)'
     const { bridge, gate, externals, sink } = make();
     const t: ExternalTarget = { system: 'github', targetId: 'ECE-FACTORY/x', environment: 'dev', effect: 'create repo ECE-FACTORY/x private', reversible: 'soft-only' };
     const actionId = approve(gate, 'create_github_repo', t);
-    const out = await bridge.externalActionWithTool('create_github_repo', actor(ORG), { approvalActionId: actionId, target: t });
+    const out = await bridge.createGithubRepo(bridge.grantCreateGithubRepoCapability(), actor(ORG), { approvalActionId: actionId, target: t });
     expect(out.status).toBe('EXTERNAL-ACTION-COMMITTED');
     expect(externals.calls).toEqual(['create_github_repo:ECE-FACTORY/x']);
     const entries = await sink.readEntries(ORG);
@@ -81,7 +81,7 @@ describe('External tools — no approval leaves store + external world untouched
     const ORG = `orgX-${Date.now()}-b`;
     const { bridge, externals, sink } = make();
     const t: ExternalTarget = { system: 'email', targetId: 'a@x.com', effect: 'email a@x.com subject hi', reversible: 'no' };
-    const out = await bridge.externalActionWithTool('send_email', actor(ORG), { target: t });
+    const out = await bridge.sendEmail(bridge.grantSendEmailCapability(), actor(ORG), { target: t });
     expect(out.status).toBe('STOP_FOR_APPROVAL');
     expect(externals.calls).toHaveLength(0);
     const entries = await sink.readEntries(ORG);
@@ -99,7 +99,7 @@ describe('External tools — kill beats approval (real PostgreSQL)', () => {
     const { bridge, gate, externals, sink } = make(kill);
     const t: ExternalTarget = { system: 'github', targetId: 'ECE-FACTORY/x', effect: 'create repo ECE-FACTORY/x', reversible: 'soft-only' };
     const actionId = approve(gate, 'create_github_repo', t);
-    const out = await bridge.externalActionWithTool('create_github_repo', actor(ORG), { approvalActionId: actionId, target: t });
+    const out = await bridge.createGithubRepo(bridge.grantCreateGithubRepoCapability(), actor(ORG), { approvalActionId: actionId, target: t });
     expect(out.status).toBe('refused');
     expect(externals.calls).toHaveLength(0);
     expect(kinds(await sink.readEntries(ORG), 'refusal')).toBe(1);

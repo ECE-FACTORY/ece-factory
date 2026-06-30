@@ -10,17 +10,28 @@
 
 import { LiveFactoryReadPorts } from './live-read-adapters.js';
 import { LiveWriteStores } from './live-write-adapters.js';
+import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
+import { EXTERNAL_TOOLS, type ExternalTool } from '../features/mcp-bridge/external-tools.js';
 
 export type TierBacking = 'live' | 'fake' | 'disabled' | 'not-wired';
+/** The external tier can be MIXED once some actions go live and others stay fake (Phase 9.4). */
+export type ExternalAggregateBacking = TierBacking | 'partial';
+
+/** The external actions — reported per-action so a mixed tier (one live, five fake) is honest. Canonical
+ *  source is the bridge's EXTERNAL_TOOLS (single source of truth — no re-hardcoded action names here). */
+export const EXTERNAL_ACTIONS = EXTERNAL_TOOLS;
+export type ExternalAction = ExternalTool;
 
 export interface TierStatusReport {
   tiers: {
     read_only: TierBacking;
     draft_only: TierBacking;
     internal_write: TierBacking;
-    external: TierBacking;
+    external: ExternalAggregateBacking;
     forbidden: 'registered-and-refused';
   };
+  /** Per-action external backing — derived from the REAL injected adapter instance (never a label). */
+  externalByAction: Record<ExternalAction, TierBacking>;
   toolCounts: { read_only: number; draft_only: number; internal_write: number; external: number; forbidden: number };
   database: {
     /** true/false from a read-only probe; 'unknown' if no probe was supplied. */
@@ -53,10 +64,25 @@ export interface TierWiring {
   factoryPorts?: object;     // READ_ONLY backing
   draftPorts?: object;       // DRAFT_ONLY backing
   writeStores?: object;      // internal-write backing
-  externalSystems?: object;  // external backing
+  externalSystems?: object;  // external backing (single object — used as the fallback per-action backing)
+  /**
+   * Per-action external backing OBJECTS (the real adapter instances the bridge delegates to). When present,
+   * each action's backing is derived from ITS instance (instanceof the live class) — so a partially-live
+   * external tier is reported honestly. When absent, every action falls back to `externalSystems`.
+   */
+  externalAdapters?: Partial<Record<ExternalAction, object>>;
   readRole: string;          // role NAME only
   writeRole: string;         // role NAME only
   toolCounts: TierStatusReport['toolCounts'];
+}
+
+/** Aggregate the per-action external backings: all-live ⇒ live, all-not-wired ⇒ not-wired, none-live ⇒ fake, mixed ⇒ partial. */
+function aggregateExternal(byAction: Record<ExternalAction, TierBacking>): ExternalAggregateBacking {
+  const vals = EXTERNAL_ACTIONS.map((a) => byAction[a]);
+  if (vals.every((v) => v === 'live')) return 'live';
+  if (vals.every((v) => v === 'not-wired')) return 'not-wired';
+  if (vals.some((v) => v === 'live')) return 'partial'; // some live + some not ⇒ honestly partial
+  return 'fake';
 }
 
 /**
@@ -85,14 +111,21 @@ export async function buildTierStatusReport(wiring: TierWiring, probe?: DbProbe)
       reachable = false; // a failed probe is honestly "not reachable" — never assumed live
     }
   }
+  // Per-action external backing — each derived from ITS real adapter instance (instanceof the live class);
+  // fall back to the single `externalSystems` object when no per-action map is supplied. A fake is NEVER live.
+  const externalByAction = Object.fromEntries(
+    EXTERNAL_ACTIONS.map((a) => [a, deriveBacking(wiring.externalAdapters?.[a] ?? wiring.externalSystems, [LiveGitHubRepoAdapter])]),
+  ) as Record<ExternalAction, TierBacking>;
+
   return {
     tiers: {
       read_only: deriveBacking(wiring.factoryPorts, [LiveFactoryReadPorts]),
       draft_only: deriveBacking(wiring.draftPorts, []),         // no live draft adapter exists ⇒ fake/not-wired
       internal_write: deriveBacking(wiring.writeStores, [LiveWriteStores]),
-      external: deriveBacking(wiring.externalSystems, []),       // no live external adapter exists ⇒ fake/not-wired
+      external: aggregateExternal(externalByAction),            // live create_github_repo + fake others ⇒ partial
       forbidden: 'registered-and-refused',
     },
+    externalByAction,
     toolCounts: wiring.toolCounts,
     database: { reachable, persistenceKnown: false, coreTablesPresent, coreTablesExpected: CORE_TABLES.length },
     dbRoles: { read: wiring.readRole, write: wiring.writeRole },
