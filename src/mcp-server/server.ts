@@ -31,6 +31,9 @@ import { registerExternalTools, registerForbiddenTools, type ExternalSystems } f
 import { RepoCreationGateway, TicketGateway, CrmGateway, EmailGateway, DeployGateway } from '../features/external-gateways/external-gateways.js';
 import { DecisionConsole } from '../features/decision-console/decision-console.js';
 import { DecisionConsoleServer } from './decision-console-server.js';
+import type { ActionProposer, ApprovedActionCommitter } from './decision-console-server.js';
+import type { ExternalTarget } from '../features/mcp-bridge/external-tools.js';
+import type { ExternalActionRequest } from '../features/external-gateways/external-gateways.js';
 import { PostgresConsoleAudit, StopEnqueuer, EnqueueingServerCore, observingGatewayCall, type CallableCore, type GatewayCall } from './decision-console-wiring.js';
 
 /** The composition-root external gateways, wrapped so a STOP_FOR_APPROVAL auto-enqueues into the Console. */
@@ -191,7 +194,6 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
   // Piece 1b — Decision Console live: Console audit → real Postgres sink; a STOP_FOR_APPROVAL OBSERVED at the
   // transport wrapper auto-enqueues (observation-only — the wrapper returns the inner outcome verbatim).
   const decisionConsole = new DecisionConsole(approvalGate, new PostgresConsoleAudit(sink, cfg.organizationId, cfg.environment));
-  const consoleServer = new DecisionConsoleServer(decisionConsole);
   const stopEnqueuer = new StopEnqueuer(decisionConsole); // shared: internal-write (callTool) + external (gateways)
   const core: CallableCore = new EnqueueingServerCore(new McpServerCore(bridge as McpServerBridge, registry), stopEnqueuer);
   // SOLE AUTHORITY (8.8b generalized, #9): grant each external action's SINGLE capability to exactly one
@@ -216,6 +218,51 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
     session: { session_id: `mcp-${cfg.principal.user_id}`, connector_type: 'mcp', source_application: 'claude-code' },
     environment: cfg.environment, via: 'claude-code',
   };
+
+  // ── Wave 6 Piece 1d — PROPOSE surface (Design 2, strict) + commit-on-approve, composition-root/transport only ──
+  // The propose surface INITIATES an external action into the already-built enqueuing gateway (→ unchanged 8.4
+  // gauntlet → STOP → auto-enqueue) and returns the pending id. It is driven under the conduit IDENTITY
+  // ('claude-code') so the gate's separation-of-duties structurally bars it as an approver (requester ==
+  // proposingCaller == 'claude-code'); a real operator must approve. It carries the REAL server principal's ROLE
+  // (cfg.principal.role) — the permission engine's role gate is UNCHANGED, so an admin-tier action still requires
+  // an admin-configured principal to even be proposed. It has NO approvalActionId (Design 2) and holds NO gate:
+  // it cannot approve, mint, bypass, or commit — the human token minted at approval is the sole authority to commit.
+  const proposerCtx: BridgeCallContext = { ...ctx, principal: { user_id: 'claude-code', email: '', role: cfg.principal.role }, via: 'claude-code' };
+  const gatewayByTool: Record<string, GatewayCall> = {
+    create_github_repo: enqueuingGateways.createRepo, create_ticket: enqueuingGateways.createTicket,
+    update_crm_record: enqueuingGateways.updateRecord, send_email: enqueuingGateways.sendEmail, deploy_package: enqueuingGateways.deploy,
+  };
+  // Remembers the EXACT proposed request (never an approvalActionId) per pending id, so the operator's later
+  // APPROVE can re-drive the identical action. Populated only on a STOP+enqueue; the map cannot mint or approve.
+  const proposed = new Map<string, { tool: string; request: ExternalActionRequest }>();
+  const listPending = decisionConsole.listPending.bind(decisionConsole); // read-only binding — NOT the console object
+  const proposer: ActionProposer = {
+    async propose(input) {
+      const call = gatewayByTool[input.tool];
+      if (!call) return { status: 'refused', reason: `unknown or non-external tool "${input.tool}"` };
+      const request: ExternalActionRequest = { target: input.target as ExternalTarget, payload: input.payload as Record<string, unknown> | undefined }; // NO approvalActionId
+      const out = await call(request, proposerCtx); // first drive: no token → STOP → observing wrapper auto-enqueues
+      if (out.status !== 'STOP_FOR_APPROVAL') return { status: out.status, reason: 'reason' in out ? out.reason : undefined };
+      const pendingActionId = listPending().find((it) => it.tool === input.tool && it.target === request.target?.targetId)?.actionId;
+      if (pendingActionId) proposed.set(pendingActionId, { tool: input.tool, request });
+      return { status: out.status, pendingActionId };
+    },
+  };
+  // Commit-on-approve seam: invoked by DecisionConsoleServer ONLY after a genuine operator mint. Re-drives the
+  // remembered request WITH the now-minted per-action token (approvalActionId=actionId) through the SAME gateway →
+  // the unchanged gauntlet consumes the token → commit. If the action wasn't a proposed external one, no-op.
+  const committer: ApprovedActionCommitter = {
+    async commit(actionId) {
+      const entry = proposed.get(actionId);
+      if (!entry) return undefined;
+      const call = gatewayByTool[entry.tool];
+      if (!call) return undefined;
+      const out = await call({ ...entry.request, approvalActionId: actionId }, proposerCtx);
+      if (out.status === 'EXTERNAL-ACTION-COMMITTED') proposed.delete(actionId); // single-use bookkeeping (gate also enforces)
+      return { status: out.status, committed: out.status === 'EXTERNAL-ACTION-COMMITTED' ? out.committed : undefined, reason: 'reason' in out ? out.reason : undefined };
+    },
+  };
+  const consoleServer = new DecisionConsoleServer(decisionConsole, { proposer, committer, proposeToken: process.env.ECE_PROPOSE_TOKEN });
   // Tier-status reporter — derives each tier's backing from the REAL injected objects; read-only DB probe.
   const tierStatus = (): Promise<TierStatusReport> => buildTierStatusReport({
     factoryPorts, draftPorts, writeStores, externalSystems, externalAdapters,
