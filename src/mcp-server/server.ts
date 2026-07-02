@@ -31,7 +31,12 @@ import { registerExternalTools, registerForbiddenTools, type ExternalSystems } f
 import { RepoCreationGateway, TicketGateway, CrmGateway, EmailGateway, DeployGateway } from '../features/external-gateways/external-gateways.js';
 import { DecisionConsole } from '../features/decision-console/decision-console.js';
 import { DecisionConsoleServer } from './decision-console-server.js';
-import { PostgresConsoleAudit, StopEnqueuer, EnqueueingServerCore, type CallableCore } from './decision-console-wiring.js';
+import { PostgresConsoleAudit, StopEnqueuer, EnqueueingServerCore, observingGatewayCall, type CallableCore, type GatewayCall } from './decision-console-wiring.js';
+
+/** The composition-root external gateways, wrapped so a STOP_FOR_APPROVAL auto-enqueues into the Console. */
+export interface EnqueuingExternalGateways {
+  createRepo: GatewayCall; createTicket: GatewayCall; updateRecord: GatewayCall; sendEmail: GatewayCall; deploy: GatewayCall;
+}
 import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
 import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
 import { WriteAheadSequencer } from '../features/audit-engine/sequencer.js';
@@ -145,7 +150,7 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
 export interface ExternalGateways {
   repoCreation: RepoCreationGateway; ticket: TicketGateway; crm: CrmGateway; email: EmailGateway; deploy: DeployGateway;
 }
-export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport>; externalGateways: ExternalGateways; decisionConsole: DecisionConsole; consoleServer: DecisionConsoleServer } {
+export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport>; externalGateways: ExternalGateways; enqueuingGateways: EnqueuingExternalGateways; decisionConsole: DecisionConsole; consoleServer: DecisionConsoleServer } {
   const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });          // READ_ONLY tier + audit
   const writePool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgWriteUser }); // internal-write tier (append-INSERT only)
 
@@ -187,7 +192,8 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
   // transport wrapper auto-enqueues (observation-only — the wrapper returns the inner outcome verbatim).
   const decisionConsole = new DecisionConsole(approvalGate, new PostgresConsoleAudit(sink, cfg.organizationId, cfg.environment));
   const consoleServer = new DecisionConsoleServer(decisionConsole);
-  const core: CallableCore = new EnqueueingServerCore(new McpServerCore(bridge as McpServerBridge, registry), new StopEnqueuer(decisionConsole));
+  const stopEnqueuer = new StopEnqueuer(decisionConsole); // shared: internal-write (callTool) + external (gateways)
+  const core: CallableCore = new EnqueueingServerCore(new McpServerCore(bridge as McpServerBridge, registry), stopEnqueuer);
   // SOLE AUTHORITY (8.8b generalized, #9): grant each external action's SINGLE capability to exactly one
   // owning gateway, here at the composition root. No other caller can construct a capability, and the generic
   // external path refuses every external tool — so each external action has exactly one structural owner.
@@ -195,6 +201,15 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
   const externalGateways: ExternalGateways = {
     repoCreation: new RepoCreationGateway(bridge), ticket: new TicketGateway(bridge), crm: new CrmGateway(bridge),
     email: new EmailGateway(bridge), deploy: new DeployGateway(bridge),
+  };
+  // Piece 1c — external-action auto-enqueue: wrap each gateway call so a STOP_FOR_APPROVAL auto-enqueues into
+  // the SAME Console queue (observation-only; the gateway's outcome is returned verbatim). Gateways unedited.
+  const enqueuingGateways: EnqueuingExternalGateways = {
+    createRepo: observingGatewayCall('create_github_repo', (r, c) => externalGateways.repoCreation.createRepo(r, c), stopEnqueuer),
+    createTicket: observingGatewayCall('create_ticket', (r, c) => externalGateways.ticket.createTicket(r, c), stopEnqueuer),
+    updateRecord: observingGatewayCall('update_crm_record', (r, c) => externalGateways.crm.updateRecord(r, c), stopEnqueuer),
+    sendEmail: observingGatewayCall('send_email', (r, c) => externalGateways.email.sendEmail(r, c), stopEnqueuer),
+    deploy: observingGatewayCall('deploy_package', (r, c) => externalGateways.deploy.deploy(r, c), stopEnqueuer),
   };
   const ctx: BridgeCallContext = {
     principal: cfg.principal, organization_id: cfg.organizationId,
@@ -210,7 +225,7 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
       internal_write: EXPOSED_WRITE_TOOLS.length, external: EXPOSED_EXTERNAL_TOOLS.length, forbidden: FORBIDDEN_TOOLS.length,
     },
   }, makeDbProbe(pool));
-  return { core, ctx, pool, writePool, tierStatus, externalGateways, decisionConsole, consoleServer };
+  return { core, ctx, pool, writePool, tierStatus, externalGateways, enqueuingGateways, decisionConsole, consoleServer };
 }
 
 // ── JSON-RPC 2.0 over stdio (the MCP transport subset Claude Code uses) ──

@@ -22,6 +22,7 @@ import type { ActionDescriptor } from '../features/approval-gate/approval-gate.j
 import type { ExternalParams, ExternalTarget } from '../features/mcp-bridge/external-tools.js';
 import type { WriteParams } from '../features/mcp-bridge/write-tools.js';
 import type { DecisionConsole, EnqueueMeta, ConsoleAuditSink, ConsoleAuditEvent } from '../features/decision-console/decision-console.js';
+import type { GatewayOutcome, ExternalActionRequest } from '../features/external-gateways/external-gateways.js';
 import type { AuditSink } from '../features/audit-engine/sink.js';
 import type { HumanActor, SessionInfo, Environment } from '../features/audit-engine/schema.js';
 
@@ -142,4 +143,22 @@ export class EnqueueingServerCore implements CallableCore {
 
 function isStop(outcome: unknown): outcome is StopStatus {
   return typeof outcome === 'object' && outcome !== null && (outcome as { status?: unknown }).status === 'STOP_FOR_APPROVAL';
+}
+
+// ── (1) External-action stop observation at the gateway (Piece 1c) ────────────────────────────────────────
+// External actions STOP at their gateways (the generic callTool path refuses them as `encapsulated`). This
+// wraps a gateway call so a STOP_FOR_APPROVAL outcome auto-enqueues — the SAME observation-only pattern as
+// EnqueueingServerCore. The inner gateway runs the full unchanged gauntlet FIRST and its outcome is returned
+// VERBATIM; the enqueue is a side-observation that cannot change the decision. The gateway file is NOT edited
+// — this decorator lives at the composition root.
+export type GatewayCall = (request: ExternalActionRequest, ctx: BridgeCallContext) => Promise<GatewayOutcome>;
+
+export function observingGatewayCall(tool: string, call: GatewayCall, enqueuer: StopEnqueuer): GatewayCall {
+  return async (request, ctx) => {
+    const out = await call(request, ctx); // ← the full unchanged gateway → capability → 8.4 gauntlet runs first
+    if (out.status === 'STOP_FOR_APPROVAL') {
+      enqueuer.observe(tool, ctx, { target: request.target, payload: request.payload }, out); // observation only
+    }
+    return out; // verbatim — the observation cannot alter the gateway's outcome
+  };
 }
