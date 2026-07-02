@@ -35,6 +35,9 @@ import type { ActionProposer, ApprovedActionCommitter } from './decision-console
 import type { ExternalTarget } from '../features/mcp-bridge/external-tools.js';
 import type { ExternalActionRequest } from '../features/external-gateways/external-gateways.js';
 import { PostgresConsoleAudit, StopEnqueuer, EnqueueingServerCore, observingGatewayCall, type CallableCore, type GatewayCall } from './decision-console-wiring.js';
+import { PolicyEngine } from '../features/policy-engine/policy-engine.js';
+import { DEFAULT_POLICY_SET } from '../features/policy-engine/example-rules.js';
+import { PolicyGatedSeat, PostgresPolicyAudit } from './policy-console-wiring.js';
 
 /** The composition-root external gateways, wrapped so a STOP_FOR_APPROVAL auto-enqueues into the Console. */
 export interface EnqueuingExternalGateways {
@@ -262,7 +265,12 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
       return { status: out.status, committed: out.status === 'EXTERNAL-ACTION-COMMITTED' ? out.committed : undefined, reason: 'reason' in out ? out.reason : undefined };
     },
   };
-  const consoleServer = new DecisionConsoleServer(decisionConsole, { proposer, committer, proposeToken: process.env.ECE_PROPOSE_TOKEN });
+  // Wave 6 Piece 2 — the Console reads through the POLICY-GATED seat: each pending item carries its advisory
+  // policy read, and a HARD violation is withheld at the seat (no mint) WITHOUT touching the gate. The Policy
+  // Engine only informs + adds a Console-layer constraint; it cannot approve/commit/weaken any guard.
+  const policyEngine = new PolicyEngine(DEFAULT_POLICY_SET);
+  const policySeat = new PolicyGatedSeat(decisionConsole, policyEngine, new PostgresPolicyAudit(sink, cfg.organizationId, cfg.environment));
+  const consoleServer = new DecisionConsoleServer(policySeat, { proposer, committer, proposeToken: process.env.ECE_PROPOSE_TOKEN });
   // Tier-status reporter — derives each tier's backing from the REAL injected objects; read-only DB probe.
   const tierStatus = (): Promise<TierStatusReport> => buildTierStatusReport({
     factoryPorts, draftPorts, writeStores, externalSystems, externalAdapters,
