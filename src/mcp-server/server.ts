@@ -29,6 +29,9 @@ import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draf
 import { registerWriteTools } from '../features/mcp-bridge/write-tools.js';
 import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../features/mcp-bridge/external-tools.js';
 import { RepoCreationGateway, TicketGateway, CrmGateway, EmailGateway, DeployGateway } from '../features/external-gateways/external-gateways.js';
+import { DecisionConsole } from '../features/decision-console/decision-console.js';
+import { DecisionConsoleServer } from './decision-console-server.js';
+import { PostgresConsoleAudit, StopEnqueuer, EnqueueingServerCore, type CallableCore } from './decision-console-wiring.js';
 import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
 import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
 import { WriteAheadSequencer } from '../features/audit-engine/sequencer.js';
@@ -142,7 +145,7 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
 export interface ExternalGateways {
   repoCreation: RepoCreationGateway; ticket: TicketGateway; crm: CrmGateway; email: EmailGateway; deploy: DeployGateway;
 }
-export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport>; externalGateways: ExternalGateways } {
+export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport>; externalGateways: ExternalGateways; decisionConsole: DecisionConsole; consoleServer: DecisionConsoleServer } {
   const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });          // READ_ONLY tier + audit
   const writePool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgWriteUser }); // internal-write tier (append-INSERT only)
 
@@ -172,11 +175,19 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
   const draftPorts = fakeDraftPorts();                        // drafts on fakes
   const { externalSystems, externalAdapters } = buildExternalWiring(process.env); // create_github_repo may be LIVE; other 5 fake
 
+  // Hoisted so the Decision Console shares the EXACT ApprovalGate the bridge consumes — the Console is the
+  // legitimate SOURCE of the same single-use human token the gauntlet requires (Piece 1); nothing here changes
+  // the gauntlet or the gate's semantics.
+  const approvalGate = new ApprovalGate();
   const bridge = new McpBridge(
     registry, sequencer, new PostgresClientReadModel(pool), redactor,
-    { factoryPorts, writeStores, draftPorts, externalSystems, approvalGate: new BridgeApprovalGate(new ApprovalGate(), cfg.principal.user_id) },
+    { factoryPorts, writeStores, draftPorts, externalSystems, approvalGate: new BridgeApprovalGate(approvalGate, cfg.principal.user_id) },
   );
-  const core = new McpServerCore(bridge as McpServerBridge, registry);
+  // Piece 1b — Decision Console live: Console audit → real Postgres sink; a STOP_FOR_APPROVAL OBSERVED at the
+  // transport wrapper auto-enqueues (observation-only — the wrapper returns the inner outcome verbatim).
+  const decisionConsole = new DecisionConsole(approvalGate, new PostgresConsoleAudit(sink, cfg.organizationId, cfg.environment));
+  const consoleServer = new DecisionConsoleServer(decisionConsole);
+  const core: CallableCore = new EnqueueingServerCore(new McpServerCore(bridge as McpServerBridge, registry), new StopEnqueuer(decisionConsole));
   // SOLE AUTHORITY (8.8b generalized, #9): grant each external action's SINGLE capability to exactly one
   // owning gateway, here at the composition root. No other caller can construct a capability, and the generic
   // external path refuses every external tool — so each external action has exactly one structural owner.
@@ -199,13 +210,13 @@ export function buildServer(cfg: ServerEnv): { core: McpServerCore; ctx: BridgeC
       internal_write: EXPOSED_WRITE_TOOLS.length, external: EXPOSED_EXTERNAL_TOOLS.length, forbidden: FORBIDDEN_TOOLS.length,
     },
   }, makeDbProbe(pool));
-  return { core, ctx, pool, writePool, tierStatus, externalGateways };
+  return { core, ctx, pool, writePool, tierStatus, externalGateways, decisionConsole, consoleServer };
 }
 
 // ── JSON-RPC 2.0 over stdio (the MCP transport subset Claude Code uses) ──
 export interface JsonRpcMessage { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown>; }
 
-export async function handleRpc(core: McpServerCore, ctx: BridgeCallContext, msg: JsonRpcMessage, tierStatus?: () => Promise<TierStatusReport>): Promise<object | null> {
+export async function handleRpc(core: CallableCore, ctx: BridgeCallContext, msg: JsonRpcMessage, tierStatus?: () => Promise<TierStatusReport>): Promise<object | null> {
   const id = msg.id ?? null;
   if (msg.method === 'health') {
     // Observational tier-status — no tool call, no side effect, no secrets (role names/booleans/counts only).
@@ -241,7 +252,13 @@ export async function printHealth(): Promise<void> {
 export async function main(): Promise<void> {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
   const cfg = envConfig(process.env, repoRoot);
-  const { core, ctx, tierStatus } = buildServer(cfg);
+  const { core, ctx, tierStatus, consoleServer } = buildServer(cfg);
+  // Piece 1b — start the local operator seat (Decision Console UI) when a port is configured. Auto-enqueued
+  // pending actions surface here for a real human to APPROVE/REFUSE (the operator identity is the login).
+  if (process.env.ECE_CONSOLE_PORT) {
+    consoleServer.listen(Number(process.env.ECE_CONSOLE_PORT));
+    process.stderr.write(`[ece-factory mcp] decision console UI on :${process.env.ECE_CONSOLE_PORT}\n`);
+  }
   const rl = createInterface({ input: process.stdin });
   process.stderr.write(`[ece-factory mcp] up — ${core.listTools().length} tools, READ_ONLY + internal-write live (append-only, token-gated); externals on fakes\n`);
   for await (const line of rl) {
