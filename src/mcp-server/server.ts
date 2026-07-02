@@ -35,9 +35,10 @@ import type { ActionProposer, ApprovedActionCommitter } from './decision-console
 import type { ExternalTarget } from '../features/mcp-bridge/external-tools.js';
 import type { ExternalActionRequest } from '../features/external-gateways/external-gateways.js';
 import { PostgresConsoleAudit, StopEnqueuer, EnqueueingServerCore, observingGatewayCall, type CallableCore, type GatewayCall } from './decision-console-wiring.js';
-import { PolicyEngine } from '../features/policy-engine/policy-engine.js';
 import { DEFAULT_POLICY_SET } from '../features/policy-engine/example-rules.js';
+import { PolicyStore } from '../features/policy-engine/policy-store.js';
 import { PolicyGatedSeat, PostgresPolicyAudit } from './policy-console-wiring.js';
+import { PolicyChangeService, PostgresPolicyChangeAudit } from './policy-change-wiring.js';
 
 /** The composition-root external gateways, wrapped so a STOP_FOR_APPROVAL auto-enqueues into the Console. */
 export interface EnqueuingExternalGateways {
@@ -268,9 +269,25 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
   // Wave 6 Piece 2 — the Console reads through the POLICY-GATED seat: each pending item carries its advisory
   // policy read, and a HARD violation is withheld at the seat (no mint) WITHOUT touching the gate. The Policy
   // Engine only informs + adds a Console-layer constraint; it cannot approve/commit/weaken any guard.
-  const policyEngine = new PolicyEngine(DEFAULT_POLICY_SET);
-  const policySeat = new PolicyGatedSeat(decisionConsole, policyEngine, new PostgresPolicyAudit(sink, cfg.organizationId, cfg.environment));
-  const consoleServer = new DecisionConsoleServer(policySeat, { proposer, committer, proposeToken: process.env.ECE_PROPOSE_TOKEN });
+  // Wave 6 Piece 3 — the active policy lives in a VERSIONED, append-only PolicyStore; the seat evaluates the
+  // ACTIVE version. A policy CHANGE is itself a gated write: proposed → enqueued in the same Console → operator
+  // approves (mints the gate token) → applied. Reuses the gate/Console approval; the AI cannot approve; a
+  // policy change touches only PolicySet config and cannot weaken any guard.
+  const policyStore = new PolicyStore(DEFAULT_POLICY_SET);
+  const policySeat = new PolicyGatedSeat(decisionConsole, policyStore, new PostgresPolicyAudit(sink, cfg.organizationId, cfg.environment));
+  const policyChangeService = new PolicyChangeService(policyStore, decisionConsole, approvalGate, new PostgresPolicyChangeAudit(sink, cfg.organizationId, cfg.environment));
+  // Composite commit-on-approve: a policy-change item ACTIVATES the approved version; anything else re-drives
+  // the external gateway (Piece 1d). Both fire ONLY after a genuine operator mint (approveRoute).
+  const combinedCommitter: ApprovedActionCommitter = {
+    async commit(actionId) {
+      if (policyChangeService.isPolicyChange(actionId)) {
+        const r = policyChangeService.apply(actionId);
+        return r ? { status: r.status, committed: r.status === 'applied' ? { activePolicyVersion: r.activeVersion } : undefined } : undefined;
+      }
+      return committer.commit(actionId);
+    },
+  };
+  const consoleServer = new DecisionConsoleServer(policySeat, { proposer, committer: combinedCommitter, proposeToken: process.env.ECE_PROPOSE_TOKEN });
   // Tier-status reporter — derives each tier's backing from the REAL injected objects; read-only DB probe.
   const tierStatus = (): Promise<TierStatusReport> => buildTierStatusReport({
     factoryPorts, draftPorts, writeStores, externalSystems, externalAdapters,

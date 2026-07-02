@@ -15,7 +15,8 @@
 import type { OperatorSeat } from './decision-console-server.js';
 import type { PendingItem, ConsoleDecisionOutcome } from '../features/decision-console/decision-console.js';
 import type { Principal } from '../features/approval-gate/approval-gate.js';
-import type { PolicyEngine, PolicyEvaluation, PolicyActionFacts } from '../features/policy-engine/policy-engine.js';
+import type { PolicyEvaluation, PolicyActionFacts } from '../features/policy-engine/policy-engine.js';
+import type { PolicyEvaluator } from '../features/policy-engine/policy-store.js';
 import type { AuditSink } from '../features/audit-engine/sink.js';
 import type { HumanActor, SessionInfo, Environment } from '../features/audit-engine/schema.js';
 
@@ -83,7 +84,7 @@ export class PostgresPolicyAudit implements PolicyAuditSink {
 export class PolicyGatedSeat implements OperatorSeat {
   constructor(
     private readonly inner: OperatorSeat,
-    private readonly engine: PolicyEngine,
+    private readonly engine: PolicyEvaluator, // PolicyEngine OR the versioned PolicyStore (evaluates the ACTIVE version)
     private readonly audit: PolicyAuditSink = new InMemoryPolicyAudit(),
     private readonly now: () => number = () => Date.now(),
   ) {}
