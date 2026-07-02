@@ -311,6 +311,20 @@ export async function printHealth(): Promise<void> {
   await pool.end(); await writePool.end();
 }
 
+/**
+ * Report-only summary of the ACTUAL per-action external wiring (same source `/healthz` derives from): which
+ * external actions are live vs fake. Derived from the real injected adapters (never a label), so it can never
+ * claim live when fake or fake when live. Changes NO wiring/gate/adapter — startup-banner honesty only.
+ */
+export function describeExternalWiring(externalByAction: Record<ExternalAction, string>): string {
+  const actions = Object.keys(externalByAction) as ExternalAction[];
+  const live = actions.filter((a) => externalByAction[a] === 'live');
+  const fake = actions.filter((a) => externalByAction[a] !== 'live');
+  const parts = [live.length ? `live: ${live.join(', ')}` : 'live: none'];
+  if (fake.length) parts.push(`fake: ${fake.join(', ')}`);
+  return parts.join(' · ');
+}
+
 export async function main(): Promise<void> {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
   const cfg = envConfig(process.env, repoRoot);
@@ -322,7 +336,8 @@ export async function main(): Promise<void> {
     process.stderr.write(`[ece-factory mcp] decision console UI on :${process.env.ECE_CONSOLE_PORT}\n`);
   }
   const rl = createInterface({ input: process.stdin });
-  process.stderr.write(`[ece-factory mcp] up — ${core.listTools().length} tools, READ_ONLY + internal-write live (append-only, token-gated); externals on fakes\n`);
+  const externalWiring = describeExternalWiring((await tierStatus()).externalByAction); // honest per-action live/fake
+  process.stderr.write(`[ece-factory mcp] up — ${core.listTools().length} tools, READ_ONLY + internal-write live (append-only, token-gated); external — ${externalWiring}\n`);
   for await (const line of rl) {
     const trimmed = line.trim();
     if (!trimmed) continue;

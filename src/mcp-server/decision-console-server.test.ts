@@ -78,4 +78,11 @@ describe('Decision Console UI — serves a minimal operator page', () => {
     expect(r.contentType).toBe('text/html');
     expect(r.body).toMatch(/Decision Console/);
   });
+  it('Piece 1e render fix: login handler references no undefined identifier and removes the real login form, then refreshes', () => {
+    const page = server().route({ method: 'GET', path: '/' }).body;
+    expect(page).not.toMatch(/login_/);                           // the undefined identifier that threw is gone
+    expect(page).toMatch(/getElementById\('login'\)\?\.remove\(\)/); // removes the real form by its id
+    // login() still triggers the pending render (so the queue auto-loads after login — no DevTools needed)
+    expect(page).toMatch(/document\.getElementById\('login'\)\?\.remove\(\);refresh\(\);/);
+  });
 });
