@@ -86,3 +86,38 @@ describe('Decision Console UI — serves a minimal operator page', () => {
     expect(page).toMatch(/document\.getElementById\('login'\)\?\.remove\(\);refresh\(\);/);
   });
 });
+
+describe('Decision Console UI — Piece 4: the EC design layer (presentation), behavior preserved', () => {
+  const page = () => server().route({ method: 'GET', path: '/' }).body;
+  it('serves the EC monogram (inline SVG, crossbar) and the Trusted-Layer register', () => {
+    const p = page();
+    expect(p).toMatch(/ec-mark/);                        // the EC monogram mark
+    expect(p).toMatch(/<svg[^>]*aria-label="ECE"/);      // inline SVG, monochrome (currentColor)
+    expect(p).toMatch(/The Trusted Layer — forty-eight years/); // institutional register line
+    expect(p).toMatch(/ECE Decision Console/);
+  });
+  it('renders the queue card structure + the policy read with structural facts DISTINCT from the labeled advisory', () => {
+    const p = page();
+    expect(p).toMatch(/class=ec-card/);                  // structured action cards
+    expect(p).toMatch(/class=ec-kv/);                    // tool/target/effect/tier/blast/reversibility/proposer
+    expect(p).toMatch(/\[ADVISORY — informs, does not decide\]/); // advisory recommendation, labeled
+    expect(p).toMatch(/structural checks/);              // structural facts region — distinct from the advisory
+    expect(p).toMatch(/ec-check-ok|ec-check-no/);        // per-rule ✓/✗ classes
+  });
+  it('HARD-BLOCKED is shown unmistakably and disables APPROVE (behavior preserved)', () => {
+    const p = page();
+    expect(p).toMatch(/HARD-BLOCKED — not approvable/);
+    expect(p).toMatch(/policyBlocked\?'disabled/);        // approve disabled when hard-blocked
+  });
+  it('air-gap-safe: no external CDN / webfont / network reference in the page', () => {
+    const p = page();
+    expect(p).not.toMatch(/https?:\/\//);                 // no external URL
+    expect(p).not.toMatch(/fonts\.googleapis|cdn\.|@import|link[^>]+stylesheet/); // no remote fonts/styles
+  });
+  it('behavior preserved: same routes/fetches, session flow, auto-load on login', () => {
+    const p = page();
+    for (const route of ['/api/login', '/api/pending', '/api/approve', '/api/refuse']) expect(p).toContain(route);
+    expect(p).not.toMatch(/login_/);
+    expect(p).toMatch(/document\.getElementById\('login'\)\?\.remove\(\);refresh\(\);/); // Piece-1e auto-load not regressed
+  });
+});

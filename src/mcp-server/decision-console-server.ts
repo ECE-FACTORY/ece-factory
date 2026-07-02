@@ -15,6 +15,7 @@ import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { PendingItem, ConsoleDecisionOutcome } from '../features/decision-console/decision-console.js';
 import type { Principal } from '../features/approval-gate/approval-gate.js';
+import { EC_STYLE, EC_MONOGRAM } from './ec-design.js';
 
 /** The seat the UI drives. `DecisionConsole` satisfies it structurally. */
 export interface OperatorSeat {
@@ -205,15 +206,27 @@ function cookieSession(cookie: string | undefined): string | undefined {
 }
 
 // Minimal functional operator page (the shared ECE design layer is a later piece). Login → list → approve/refuse.
-const OPERATOR_PAGE = `<!doctype html><meta charset=utf-8><title>ECE Decision Console</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:60rem}.item{border:1px solid #ccc;border-radius:6px;padding:1rem;margin:.5rem 0}.k{color:#666}button{margin-right:.5rem}.pol{margin:.4rem 0;padding:.4rem;background:#f6f6f6;border-radius:4px}.rec{font-weight:bold}.hard{color:#b00;font-weight:bold}.adv{color:#a60}</style>
-<h1>ECE Decision Console <span class=k>— operator seat (piece 1)</span></h1>
-<div id=login><input id=uid placeholder="operator user_id"> <input id=email placeholder="email"> <input id=role placeholder="role"> <button onclick=login()>Log in</button></div>
-<div id=who class=k></div><div id=queue></div>
+// The operator page — the shared ECE design layer (Wave 6 Piece 4). PRESENTATION ONLY: the routes, fetch
+// calls, session flow, approver semantics, policy-read source, the Piece-1e auto-load fix, and hard-blocked
+// disabling APPROVE are all preserved byte-identically in behavior; only the markup/styling is rebuilt. The
+// style + monogram are inlined from ec-design.ts (self-contained; no external CDN/webfont — air-gap-safe).
+const OPERATOR_PAGE = `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>ECE Decision Console</title>
+<style>${EC_STYLE}</style>
+<div class=ec-shell>
+<header class=ec-header>
+<div class=ec-brand>${EC_MONOGRAM}<div><div class=ec-title>ECE Decision Console</div><div class=ec-register>The Trusted Layer — forty-eight years of being the partner the Emirates trusts.</div></div></div>
+<div id=who class=ec-operator></div>
+</header>
+<main>
+<div id=login class=ec-login><input id=uid class=ec-field placeholder="operator user_id"><input id=email class=ec-field placeholder="email"><input id=role class=ec-field placeholder="role (operator / admin)"><button class=ec-btn onclick=login()>Sign in</button></div>
+<div id=msg class=ec-msg></div>
+<div id=queue class=ec-queue></div>
+</main>
+</div>
 <script>
-let sid=null;
-async function login(){const operator={user_id:uid.value,email:email.value,role:role.value};const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operator})});const j=await r.json();if(!j.ok){who.textContent=j.error;return;}who.textContent='operator: '+j.operator.user_id;document.getElementById('login')?.remove();refresh();}
-function polHtml(p){if(!p)return'';var rules=p.perRule.map(function(r){return '<li>'+(r.satisfied?'✓':'✗')+' ['+r.severity+'] '+r.dimension+' — '+r.description+'</li>';}).join('');return '<div class=pol><span class=adv>[ADVISORY — informs, does not decide]</span> recommendation: <span class=rec>'+p.recommendation+'</span>'+(p.policyBlocked?' <span class=hard>HARD-BLOCKED — not approvable</span>':'')+'<br><b>structural checks:</b><ul class=k>'+rules+'</ul></div>';}
-async function refresh(){const r=await fetch('/api/pending');const j=await r.json();if(!j.ok){who.textContent=j.error;return;}queue.innerHTML=j.items.map(it=>'<div class=item><b>'+it.tool+'</b> <span class=k>'+(it.tier||'')+' · blast '+it.blastRadius+' · '+it.reversibility+'</span><br>target: '+(it.target||'')+'<br>effect: '+(it.effect||'')+'<br><span class=k>proposed by '+it.proposingCaller+' at '+it.requestedAtIso+'</span>'+polHtml(it.policy)+'<br><button '+(it.policy&&it.policy.policyBlocked?'disabled title="policy-blocked (hard)"':'')+' onclick="decide(\\''+it.actionId+'\\',true)">APPROVE</button><button onclick="decide(\\''+it.actionId+'\\',false)">REFUSE</button></div>').join('')||'<i>queue empty</i>';}
-async function decide(actionId,ok){const reason=prompt((ok?'APPROVE':'REFUSE')+' reason:');if(!reason)return;const r=await fetch(ok?'/api/approve':'/api/refuse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({actionId,reason})});const j=await r.json();alert(JSON.stringify(j.outcome));refresh();}
+function setWho(op){who.innerHTML='<span class=ec-op-label>Operator on seat</span><span class=ec-op-id>'+op.user_id+'</span>'+(op.role?'<span class=ec-op-role>'+op.role+'</span>':'');}
+async function login(){const operator={user_id:uid.value,email:email.value,role:role.value};const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operator})});const j=await r.json();if(!j.ok){msg.textContent=j.error;return;}setWho(j.operator);document.getElementById('login')?.remove();refresh();}
+function polHtml(p){if(!p)return'';var rows=p.perRule.map(function(r){return '<li class="'+(r.satisfied?'ec-check-ok':'ec-check-no')+'"><span class=ec-tick>'+(r.satisfied?'✓':'✗')+'</span><span class=ec-sev>'+r.severity+'</span><span class=ec-dim>'+r.dimension+'</span><span class=ec-desc>'+r.description+'</span></li>';}).join('');return '<div class=ec-policy><div class=ec-policy-head><span class=ec-advisory>[ADVISORY — informs, does not decide]</span><span class=ec-rec>'+p.recommendation+'</span>'+(p.policyBlocked?'<span class=ec-hard>HARD-BLOCKED — not approvable</span>':'')+'</div><div class=ec-checks-title>structural checks</div><ul class=ec-checks>'+rows+'</ul></div>';}
+async function refresh(){const r=await fetch('/api/pending');const j=await r.json();if(!j.ok){msg.textContent=j.error;return;}if(!j.items.length){queue.innerHTML='<div class=ec-empty>The queue is clear. No actions await a decision.</div>';return;}queue.innerHTML=j.items.map(it=>'<article class=ec-card><div class=ec-card-head><span class=ec-tool>'+it.tool+'</span><span class=ec-tier>'+(it.tier||'')+'</span></div><dl class=ec-kv><dt>Target</dt><dd>'+(it.target||'—')+'</dd><dt>Effect</dt><dd>'+(it.effect||'—')+'</dd><dt>Blast radius</dt><dd>'+it.blastRadius+'</dd><dt>Reversibility</dt><dd>'+it.reversibility+'</dd><dt>Proposed by</dt><dd>'+it.proposingCaller+'</dd><dt>At</dt><dd>'+it.requestedAtIso+'</dd></dl>'+polHtml(it.policy)+'<div class=ec-actions><button class="ec-btn ec-btn-approve" '+(it.policy&&it.policy.policyBlocked?'disabled title="policy-blocked (hard)"':'')+' onclick="decide(\\''+it.actionId+'\\',true)">Approve</button><button class="ec-btn ec-btn-refuse" onclick="decide(\\''+it.actionId+'\\',false)">Refuse</button></div></article>').join('');}
+async function decide(actionId,ok){const reason=prompt((ok?'Approve':'Refuse')+' — reason for the record:');if(!reason)return;const r=await fetch(ok?'/api/approve':'/api/refuse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({actionId,reason})});const j=await r.json();msg.textContent=(j.outcome&&j.outcome.status?j.outcome.status:(j.ok?'recorded':'error'))+' — '+actionId;refresh();}
 </script>`;
