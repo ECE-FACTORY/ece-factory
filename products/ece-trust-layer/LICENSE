@@ -1,0 +1,16 @@
+ECE Trust & Attestation Layer — INTERNAL ECE FACTORY trust/security module
+Copyright (c) 2026 Emirates Cloud Enterprises (ECE). All rights reserved.
+
+CLASSIFICATION: internal factory infrastructure, NOT a sellable product. Per the
+recorded classification reset, no products exist until the factory is complete;
+this module is part of the ECE Factory and is not to be published as a product repo.
+
+INTERNAL / ECE-OWNED — this module is ECE-owned and is NOT open source. No license to
+use, copy, modify, or distribute is granted except under a separate written agreement
+with ECE.
+
+This module EXTENDS third-party open-source components, which remain under their own
+permissive licenses and whose attributions are preserved (see UPSTREAM_TRACKING.md and
+HARVEST_REPORT.md). The permissive upstream licenses (BSD-3-Clause; W3C Software and
+Document License for context data files) apply to those components only; they do not
+open-source this module.

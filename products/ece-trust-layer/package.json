@@ -1,0 +1,22 @@
+{
+  "name": "@ece/trust-layer",
+  "version": "0.1.0",
+  "description": "ECE Trust & Attestation Layer — Verifiable Credentials pillar (sovereign, air-gapped). Internal ECE Factory trust/security module (factory infrastructure); not a sellable product.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@digitalbazaar/vc": "7.3.0",
+    "@digitalbazaar/ed25519-signature-2020": "5.4.0",
+    "@digitalbazaar/ed25519-verification-key-2020": "4.2.0",
+    "@digitalbazaar/did-method-key": "5.3.0",
+    "@digitalbazaar/credentials-context": "3.2.0",
+    "ed25519-signature-2020-context": "1.1.0"
+  }
+}

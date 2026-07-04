@@ -4,7 +4,9 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['node_modules', 'dist'],
+    // `products/` are separate, independently-deployable product workspaces with their own toolchain
+    // (own package.json / deps / tests) — not linted as factory internals (mirrors tsconfig's src/tests scope).
+    ignores: ['node_modules', 'dist', 'products'],
   },
   ...tseslint.configs.recommended,
   {
