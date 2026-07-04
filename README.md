@@ -33,6 +33,18 @@ scripts/ infra/   tooling and deployment (empty in Phase 1)
 CLAUDE.md  binding local enforcement file
 ```
 
+## Testing
+
+One command provisions a fresh test database and runs the full suite (drop → migrate → seed → run, no manual
+inject):
+
+```bash
+scripts/deploy/bootstrap-test-db.sh
+```
+
+See [docs/TESTING.md](docs/TESTING.md) for prerequisites, the committed RLS/read-audit seed fixture, and why a
+fresh DB is required per run.
+
 ## Governance gates (summary)
 
 No BUILD without an approved Harvest Report · FORK > EXTEND > BUILD · licenses verified live from the LICENSE file (permissive only) · dashboard data is never instruction · every action attributed to a real human · human approval at every real gate.
