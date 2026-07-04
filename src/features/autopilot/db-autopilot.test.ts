@@ -60,7 +60,7 @@ class XSystems implements ExternalSystems {
   private rec() { this.calls++; return Promise.resolve({ ok: true }); }
   createGithubRepo(_t: ExternalTarget) { return this.rec(); } openPullRequest() { return this.rec(); }
   createTicket() { return this.rec(); } updateCrmRecord() { return this.rec(); }
-  sendEmail() { return this.rec(); } deployPackage() { return this.rec(); }
+  sendEmail() { return this.rec(); } deployPackage() { return this.rec(); } createMilestone() { return this.rec(); } createLabel() { return this.rec(); } createIssueBatch() { return this.rec(); }
 }
 
 const kinds = (rows: { kind: string }[], k: string) => rows.filter((r) => r.kind === k).length;

@@ -21,6 +21,9 @@ import { LiveWriteStores } from './live-write-adapters.js';
 import { buildTierStatusReport, makeDbProbe, type TierStatusReport, type ExternalAction } from './tier-status.js';
 import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
 import { LiveGitHubIssueAdapter } from './live-github-issue-adapter.js';
+import { LiveGitHubMilestoneAdapter } from './live-github-milestone-adapter.js';
+import { LiveGitHubLabelAdapter } from './live-github-label-adapter.js';
+import { LiveGitHubIssueBatchAdapter } from './live-github-issue-batch-adapter.js';
 import { McpBridge, EXPOSED_READ_TOOLS, EXPOSED_DRAFT_TOOLS, EXPOSED_WRITE_TOOLS, EXPOSED_EXTERNAL_TOOLS } from '../features/mcp-bridge/mcp-bridge.js';
 import { FORBIDDEN_TOOLS } from '../features/mcp-bridge/external-tools.js';
 import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
@@ -28,7 +31,7 @@ import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-to
 import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draft-tools.js';
 import { registerWriteTools } from '../features/mcp-bridge/write-tools.js';
 import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../features/mcp-bridge/external-tools.js';
-import { RepoCreationGateway, TicketGateway, CrmGateway, EmailGateway, DeployGateway } from '../features/external-gateways/external-gateways.js';
+import { RepoCreationGateway, TicketGateway, CrmGateway, EmailGateway, DeployGateway, MilestoneGateway, LabelGateway, IssueBatchGateway } from '../features/external-gateways/external-gateways.js';
 import { DecisionConsole } from '../features/decision-console/decision-console.js';
 import { DecisionConsoleServer } from './decision-console-server.js';
 import type { ActionProposer, ApprovedActionCommitter } from './decision-console-server.js';
@@ -43,6 +46,7 @@ import { PolicyChangeService, PostgresPolicyChangeAudit } from './policy-change-
 /** The composition-root external gateways, wrapped so a STOP_FOR_APPROVAL auto-enqueues into the Console. */
 export interface EnqueuingExternalGateways {
   createRepo: GatewayCall; createTicket: GatewayCall; updateRecord: GatewayCall; sendEmail: GatewayCall; deploy: GatewayCall;
+  createMilestone: GatewayCall; createLabel: GatewayCall; createIssueBatch: GatewayCall;
 }
 import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
 import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
@@ -67,7 +71,7 @@ function fakeDraftPorts(): DraftPorts {
 }
 function fakeExternalSystems(): ExternalSystems {
   const x = async (): Promise<never> => { throw new Error('external systems are fakes this phase — no live external action'); };
-  return { createGithubRepo: x, openPullRequest: x, createTicket: x, updateCrmRecord: x, sendEmail: x, deployPackage: x };
+  return { createGithubRepo: x, openPullRequest: x, createTicket: x, updateCrmRecord: x, sendEmail: x, deployPackage: x, createMilestone: x, createLabel: x, createIssueBatch: x };
 }
 
 /**
@@ -89,16 +93,29 @@ function buildExternalWiring(env: NodeJS.ProcessEnv): { externalSystems: Externa
   const issues: Pick<ExternalSystems, 'createTicket'> = githubLive
     ? new LiveGitHubIssueAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun })
     : fake;
+  const milestones: Pick<ExternalSystems, 'createMilestone'> = githubLive
+    ? new LiveGitHubMilestoneAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun })
+    : fake;
+  const labels: Pick<ExternalSystems, 'createLabel'> = githubLive
+    ? new LiveGitHubLabelAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun })
+    : fake;
+  const issueBatch: Pick<ExternalSystems, 'createIssueBatch'> = githubLive
+    ? new LiveGitHubIssueBatchAdapter({ token: env.ECE_GITHUB_TOKEN ?? '', dryRun })
+    : fake;
   const externalAdapters: Record<ExternalAction, object> = {
     create_github_repo: github, create_ticket: issues, open_pull_request: fake,
     update_crm_record: fake, send_email: fake, deploy_package: fake,
+    create_milestone: milestones, create_label: labels, create_issue_batch: issueBatch,
   };
-  // The composite the bridge calls: the four remaining actions stay exactly on the fakes; ONLY
-  // create_github_repo and create_ticket are overridden to route to their (live|fake) adapters. Gate unchanged.
+  // The composite the bridge calls: the remaining actions stay exactly on the fakes; ONLY the GitHub-backed
+  // actions are overridden to route to their (live|fake) adapters. Gate unchanged.
   const externalSystems: ExternalSystems = {
     ...fake,
     createGithubRepo: (t, p) => github.createGithubRepo(t, p),
     createTicket: (t, p) => issues.createTicket(t, p),
+    createMilestone: (t, p) => milestones.createMilestone(t, p),
+    createLabel: (t, p) => labels.createLabel(t, p),
+    createIssueBatch: (t, p) => issueBatch.createIssueBatch(t, p),
   };
   return { externalSystems, externalAdapters };
 }
@@ -156,6 +173,7 @@ export function envConfig(env: NodeJS.ProcessEnv, repoRoot: string): ServerEnv {
 /** Build the bridge (live reads + fake writes/externals) and the server core. No stdin involved — testable. */
 export interface ExternalGateways {
   repoCreation: RepoCreationGateway; ticket: TicketGateway; crm: CrmGateway; email: EmailGateway; deploy: DeployGateway;
+  milestone: MilestoneGateway; label: LabelGateway; issueBatch: IssueBatchGateway;
 }
 export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCallContext; pool: InstanceType<typeof Pool>; writePool: InstanceType<typeof Pool>; tierStatus: () => Promise<TierStatusReport>; externalGateways: ExternalGateways; enqueuingGateways: EnqueuingExternalGateways; decisionConsole: DecisionConsole; consoleServer: DecisionConsoleServer } {
   const pool = new Pool({ host: cfg.pgHost, port: cfg.pgPort, database: cfg.pgDatabase, user: cfg.pgUser });          // READ_ONLY tier + audit
@@ -207,6 +225,7 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
   const externalGateways: ExternalGateways = {
     repoCreation: new RepoCreationGateway(bridge), ticket: new TicketGateway(bridge), crm: new CrmGateway(bridge),
     email: new EmailGateway(bridge), deploy: new DeployGateway(bridge),
+    milestone: new MilestoneGateway(bridge), label: new LabelGateway(bridge), issueBatch: new IssueBatchGateway(bridge),
   };
   // Piece 1c — external-action auto-enqueue: wrap each gateway call so a STOP_FOR_APPROVAL auto-enqueues into
   // the SAME Console queue (observation-only; the gateway's outcome is returned verbatim). Gateways unedited.
@@ -216,6 +235,9 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
     updateRecord: observingGatewayCall('update_crm_record', (r, c) => externalGateways.crm.updateRecord(r, c), stopEnqueuer),
     sendEmail: observingGatewayCall('send_email', (r, c) => externalGateways.email.sendEmail(r, c), stopEnqueuer),
     deploy: observingGatewayCall('deploy_package', (r, c) => externalGateways.deploy.deploy(r, c), stopEnqueuer),
+    createMilestone: observingGatewayCall('create_milestone', (r, c) => externalGateways.milestone.createMilestone(r, c), stopEnqueuer),
+    createLabel: observingGatewayCall('create_label', (r, c) => externalGateways.label.createLabel(r, c), stopEnqueuer),
+    createIssueBatch: observingGatewayCall('create_issue_batch', (r, c) => externalGateways.issueBatch.createIssueBatch(r, c), stopEnqueuer),
   };
   const ctx: BridgeCallContext = {
     principal: cfg.principal, organization_id: cfg.organizationId,
@@ -235,6 +257,7 @@ export function buildServer(cfg: ServerEnv): { core: CallableCore; ctx: BridgeCa
   const gatewayByTool: Record<string, GatewayCall> = {
     create_github_repo: enqueuingGateways.createRepo, create_ticket: enqueuingGateways.createTicket,
     update_crm_record: enqueuingGateways.updateRecord, send_email: enqueuingGateways.sendEmail, deploy_package: enqueuingGateways.deploy,
+    create_milestone: enqueuingGateways.createMilestone, create_label: enqueuingGateways.createLabel, create_issue_batch: enqueuingGateways.createIssueBatch,
   };
   // Remembers the EXACT proposed request (never an approvalActionId) per pending id, so the operator's later
   // APPROVE can re-drive the identical action. Populated only on a STOP+enqueue; the map cannot mint or approve.

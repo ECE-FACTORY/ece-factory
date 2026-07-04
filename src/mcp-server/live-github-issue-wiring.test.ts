@@ -25,7 +25,7 @@ function mockFetch() {
 // composite the composition root builds: create_ticket → live issue adapter; the rest → throwing fakes.
 function liveExternalSystems(issues: LiveGitHubIssueAdapter): ExternalSystems {
   const nope = async (): Promise<never> => { throw new Error('fake this phase'); };
-  return { createGithubRepo: nope, openPullRequest: nope, createTicket: (t, p) => issues.createTicket(t, p), updateCrmRecord: nope, sendEmail: nope, deployPackage: nope };
+  return { createGithubRepo: nope, openPullRequest: nope, createTicket: (t, p) => issues.createTicket(t, p), updateCrmRecord: nope, sendEmail: nope, deployPackage: nope, createMilestone: nope, createLabel: nope, createIssueBatch: nope };
 }
 class FakeSequencer implements AuditedSequencerPort {
   refusals = 0; private seq = 0;
@@ -94,7 +94,7 @@ describe('Phase 9.5 — live GitHub Issues reached ONLY via gateway + capability
 });
 
 describe('Phase 9.5 — tier-status reports create_ticket honestly (a fake is never live)', () => {
-  const base: TierWiring = { readRole: 'ece_app', writeRole: 'ece_writer', toolCounts: { read_only: 16, draft_only: 7, internal_write: 6, external: 6, forbidden: 6 } };
+  const base: TierWiring = { readRole: 'ece_app', writeRole: 'ece_writer', toolCounts: { read_only: 16, draft_only: 7, internal_write: 6, external: 9, forbidden: 6 } };
   const fake = { createGithubRepo: async () => ({}) };
   it('live create_github_repo + live create_ticket + fake others ⇒ both live, aggregate partial', async () => {
     const repo = new LiveGitHubRepoAdapter({ token: SECRET, fetchImpl: mockFetch().impl });

@@ -41,7 +41,7 @@ class WFakes implements WriteStores {
 class XFakes implements ExternalSystems {
   calls = 0;
   private x = async (): Promise<never> => { this.calls++; throw new Error('unreached'); };
-  createGithubRepo = this.x; openPullRequest = this.x; createTicket = this.x; updateCrmRecord = this.x; sendEmail = this.x; deployPackage = this.x;
+  createGithubRepo = this.x; openPullRequest = this.x; createTicket = this.x; updateCrmRecord = this.x; sendEmail = this.x; deployPackage = this.x; createMilestone = this.x; createLabel = this.x; createIssueBatch = this.x;
 }
 const draft = async (): Promise<unknown> => ({ note: 'fake' });
 const DRAFTS: DraftPorts = { nextPrompt: draft, reviewDecision: draft, waveReport: draft, productPlan: draft, riskSummary: draft, openItemsSummary: draft, repoPlan: draft };

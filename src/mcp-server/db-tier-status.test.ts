@@ -48,7 +48,7 @@ describe('Tier-Status — the real server wiring reports LIVE reads/writes, FAKE
       expect(report.database.reachable).toBe(true);
       expect(report.database.coreTablesPresent).toBe(CORE_TABLES.length);
       expect(report.dbRoles).toEqual({ read: 'ece_app', write: 'ece_writer' });
-      expect(report.toolCounts).toMatchObject({ read_only: 16, draft_only: 7, internal_write: 6, external: 6, forbidden: 6 });
+      expect(report.toolCounts).toMatchObject({ read_only: 16, draft_only: 7, internal_write: 6, external: 9, forbidden: 6 });
       // NO secrets
       expect(JSON.stringify(report)).not.toMatch(/postgres:\/\/|password|secret|PGPASSWORD/i);
     } finally { await pool.end(); await writePool.end(); }

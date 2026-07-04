@@ -36,6 +36,9 @@ class FakeExternals implements ExternalSystems {
   updateCrmRecord(t: ExternalTarget) { return this.rec('update_crm_record', t); }
   sendEmail(t: ExternalTarget) { return this.rec('send_email', t); }
   deployPackage(t: ExternalTarget) { return this.rec('deploy_package', t); }
+  createMilestone(t: ExternalTarget) { return this.rec('create_milestone', t); }
+  createLabel(t: ExternalTarget) { return this.rec('create_label', t); }
+  createIssueBatch(t: ExternalTarget) { return this.rec('create_issue_batch', t); }
 }
 function ctx(): BridgeCallContext { return { principal: { user_id: 'admin1', email: 'a@ece.ae', role: 'admin' }, organization_id: 'orgDC', session: { session_id: 's' }, environment: 'local', via: CALLER }; }
 const OPERATOR: Principal = { user_id: 'human_boss', email: 'b@e', role: 'admin' };

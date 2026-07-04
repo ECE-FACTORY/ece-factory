@@ -12,13 +12,16 @@ import { LiveFactoryReadPorts } from './live-read-adapters.js';
 import { LiveWriteStores } from './live-write-adapters.js';
 import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
 import { LiveGitHubIssueAdapter } from './live-github-issue-adapter.js';
+import { LiveGitHubMilestoneAdapter } from './live-github-milestone-adapter.js';
+import { LiveGitHubLabelAdapter } from './live-github-label-adapter.js';
+import { LiveGitHubIssueBatchAdapter } from './live-github-issue-batch-adapter.js';
 import { EXTERNAL_TOOLS, type ExternalTool } from '../features/mcp-bridge/external-tools.js';
 
 export type TierBacking = 'live' | 'fake' | 'disabled' | 'not-wired';
 /** The external tier can be MIXED once some actions go live and others stay fake (Phase 9.4). */
 export type ExternalAggregateBacking = TierBacking | 'partial';
 
-/** The external actions — reported per-action so a mixed tier (one live, five fake) is honest. Canonical
+/** The external actions — reported per-action so a mixed tier (some live, others fake) is honest. Canonical
  *  source is the bridge's EXTERNAL_TOOLS (single source of truth — no re-hardcoded action names here). */
 export const EXTERNAL_ACTIONS = EXTERNAL_TOOLS;
 export type ExternalAction = ExternalTool;
@@ -115,7 +118,7 @@ export async function buildTierStatusReport(wiring: TierWiring, probe?: DbProbe)
   // Per-action external backing — each derived from ITS real adapter instance (instanceof the live class);
   // fall back to the single `externalSystems` object when no per-action map is supplied. A fake is NEVER live.
   const externalByAction = Object.fromEntries(
-    EXTERNAL_ACTIONS.map((a) => [a, deriveBacking(wiring.externalAdapters?.[a] ?? wiring.externalSystems, [LiveGitHubRepoAdapter, LiveGitHubIssueAdapter])]),
+    EXTERNAL_ACTIONS.map((a) => [a, deriveBacking(wiring.externalAdapters?.[a] ?? wiring.externalSystems, [LiveGitHubRepoAdapter, LiveGitHubIssueAdapter, LiveGitHubMilestoneAdapter, LiveGitHubLabelAdapter, LiveGitHubIssueBatchAdapter])]),
   ) as Record<ExternalAction, TierBacking>;
 
   return {

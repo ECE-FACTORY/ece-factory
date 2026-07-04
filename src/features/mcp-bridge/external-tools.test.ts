@@ -41,6 +41,9 @@ class FakeExternals implements ExternalSystems {
   updateCrmRecord(t: ExternalTarget) { return this.rec('update_crm_record', t); }
   sendEmail(t: ExternalTarget) { return this.rec('send_email', t); }
   deployPackage(t: ExternalTarget) { return this.rec('deploy_package', t); }
+  createMilestone(t: ExternalTarget) { return this.rec('create_milestone', t); }
+  createLabel(t: ExternalTarget) { return this.rec('create_label', t); }
+  createIssueBatch(t: ExternalTarget) { return this.rec('create_issue_batch', t); }
 }
 
 const CALLER = 'claude';
@@ -83,6 +86,9 @@ function callExternal(bridge: McpBridge, tool: string, c: BridgeCallContext, par
     case 'update_crm_record': return bridge.updateCrmRecord(bridge.grantUpdateCrmRecordCapability(), c, params);
     case 'send_email': return bridge.sendEmail(bridge.grantSendEmailCapability(), c, params);
     case 'deploy_package': return bridge.deployPackage(bridge.grantDeployPackageCapability(), c, params);
+    case 'create_milestone': return bridge.createMilestone(bridge.grantCreateMilestoneCapability(), c, params);
+    case 'create_label': return bridge.createLabel(bridge.grantCreateLabelCapability(), c, params);
+    case 'create_issue_batch': return bridge.createIssueBatch(bridge.grantCreateIssueBatchCapability(), c, params);
     default: return bridge.externalActionWithTool(tool as never, c, params); // FORBIDDEN/unregistered → generic path (refused)
   }
 }
@@ -237,7 +243,7 @@ describe('External tools — four-tier surface, FORBIDDEN refused, per-tool perm
   it('the exposed surface is the four tiers; FORBIDDEN tools are registered-and-refused, not exposed', () => {
     const { bridge, registry } = build();
     const tools = bridge.listTools();
-    expect(tools).toHaveLength(EXPOSED_TOOLS.length); // 16 + 7 + 6 + 6 = 35 (FORBIDDEN not exposed)
+    expect(tools).toHaveLength(EXPOSED_TOOLS.length); // 16 + 7 + 6 + 9 = 38 (FORBIDDEN not exposed)
     const classes = new Set(tools.map((t) => classifyRegisteredTool(registry.require(t.name))));
     expect([...classes].sort()).toEqual(['APPROVAL_REQUIRED_WRITE', 'DRAFT_ONLY', 'READ_ONLY']); // no FORBIDDEN exposed
     const externalNames = tools.filter((t) => EXPOSED_EXTERNAL_TOOLS.includes(t.name as never)).map((t) => t.name).sort();

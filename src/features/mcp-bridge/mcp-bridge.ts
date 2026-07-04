@@ -97,21 +97,21 @@ export type BridgeRefusalStage = 'registry' | 'read-only-gate' | 'authorize' | '
 // unforgeable, PER-ACTION capability:
 //   • UNFORGEABLE — the brand key is a module-private `unique symbol`; an `ExternalCapability` cannot be
 //     constructed or even named outside this module (exactly like the approval token's unforgeability).
-//   • PER-ACTION — the phantom tool-name parameter `N` makes the six capability types MUTUALLY
+//   • PER-ACTION — the phantom tool-name parameter `N` makes the nine capability types MUTUALLY
 //     non-assignable, so a `send_email` capability cannot be passed where `create_ticket` is required
 //     (binding proven at the TYPE level; also re-checked at RUNTIME by the capability's brand value).
-// The generic `externalActionWithTool` REFUSES all six (stage `encapsulated`) — closing the "any module
+// The generic `externalActionWithTool` REFUSES all nine (stage `encapsulated`) — closing the "any module
 // holding the bridge could call them" bypass. This is an encapsulation/visibility seam, NOT a new gate: each
 // capability method runs the UNCHANGED full Phase 8.4 gauntlet (`runExternalAction`). Sole holders: the PR
-// Engine (open_pull_request) and the five per-action external gateways, each granted its single capability at
-// the composition root — exactly one owner per action (8.8b's structural sole authority, now for all 6).
+// Engine (open_pull_request) and the eight per-action external gateways, each granted its single capability at
+// the composition root — exactly one owner per action (8.8b's structural sole authority, now for all 9).
 declare const EXTERNAL_CAP: unique symbol;
 export interface ExternalCapability<N extends ExternalTool> { readonly [EXTERNAL_CAP]: N }
 const EXTERNAL_CAP_BRAND: typeof EXTERNAL_CAP = Symbol('externalCapability') as unknown as typeof EXTERNAL_CAP;
 function mintExternalCapability<N extends ExternalTool>(name: N): ExternalCapability<N> {
   return { [EXTERNAL_CAP_BRAND]: name } as ExternalCapability<N>;
 }
-/** All six external actions are capability-encapsulated — the generic path can assemble NONE of them. */
+/** All nine external actions are capability-encapsulated — the generic path can assemble NONE of them. */
 const ENCAPSULATED_EXTERNAL_TOOLS: ReadonlySet<ExternalTool> = new Set(EXTERNAL_TOOLS);
 /** @deprecated Phase 8.8b name retained — the PR-open capability is `ExternalCapability<'open_pull_request'>`. */
 export type OpenPrCapability = ExternalCapability<'open_pull_request'>;
@@ -328,7 +328,7 @@ export class McpBridge {
     // SOLE-AUTHORITY (8.8b generalized in 9.3 / #9): EVERY external action is capability-encapsulated behind
     // its owning module (PR Engine / per-action gateway). The generic path can assemble NONE of them — use the
     // capability-gated method (createGithubRepo / openPullRequest / createTicket / updateCrmRecord / sendEmail
-    // / deployPackage). This closes the bypass for all six.
+    // / deployPackage / createMilestone / createLabel / createIssueBatch). This closes the bypass for all nine.
     if (ENCAPSULATED_EXTERNAL_TOOLS.has(name)) {
       return { status: 'refused', tool: name, stage: 'encapsulated', reason: `"${name}" is reachable only through its capability-holding owner (encapsulated); the generic external path cannot assemble it` };
     }
@@ -338,13 +338,16 @@ export class McpBridge {
 
   // ── Capability minters — one per external action. Each mints that action's single, unforgeable, PER-ACTION
   //    capability. The sole holder is the action's owning module (PR Engine / per-action gateway), to which it
-  //    is granted at the composition root. (8.8b's `grantPrOpenCapability` generalized to all six.) ──
+  //    is granted at the composition root. (8.8b's `grantPrOpenCapability` generalized to all nine.) ──
   grantCreateGithubRepoCapability(): ExternalCapability<'create_github_repo'> { return mintExternalCapability('create_github_repo'); }
   grantOpenPullRequestCapability(): ExternalCapability<'open_pull_request'> { return mintExternalCapability('open_pull_request'); }
   grantCreateTicketCapability(): ExternalCapability<'create_ticket'> { return mintExternalCapability('create_ticket'); }
   grantUpdateCrmRecordCapability(): ExternalCapability<'update_crm_record'> { return mintExternalCapability('update_crm_record'); }
   grantSendEmailCapability(): ExternalCapability<'send_email'> { return mintExternalCapability('send_email'); }
   grantDeployPackageCapability(): ExternalCapability<'deploy_package'> { return mintExternalCapability('deploy_package'); }
+  grantCreateMilestoneCapability(): ExternalCapability<'create_milestone'> { return mintExternalCapability('create_milestone'); }
+  grantCreateLabelCapability(): ExternalCapability<'create_label'> { return mintExternalCapability('create_label'); }
+  grantCreateIssueBatchCapability(): ExternalCapability<'create_issue_batch'> { return mintExternalCapability('create_issue_batch'); }
   /** @deprecated Phase 8.8b name retained for the PR Engine — aliases `grantOpenPullRequestCapability`. */
   grantPrOpenCapability(): OpenPrCapability { return mintExternalCapability('open_pull_request'); }
 
@@ -369,6 +372,18 @@ export class McpBridge {
   }
   deployPackage(capability: ExternalCapability<'deploy_package'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
     return this.runEncapsulatedExternal('deploy_package', capability, ctx, params);
+  }
+  createMilestone(capability: ExternalCapability<'create_milestone'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('create_milestone', capability, ctx, params);
+  }
+  createLabel(capability: ExternalCapability<'create_label'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('create_label', capability, ctx, params);
+  }
+  /** Gated bulk — ONE action carrying a bounded, content-bound enumerated issue list. Runs the UNCHANGED
+   *  8.4 gauntlet; the per-action approval binds `params.payload` (the enumerated issues) — so an approved
+   *  batch cannot be swapped/extended/altered after approval (content mismatch ⇒ withheld). */
+  createIssueBatch(capability: ExternalCapability<'create_issue_batch'>, ctx: BridgeCallContext, params: ExternalParams = {}): Promise<ExternalOutcome> {
+    return this.runEncapsulatedExternal('create_issue_batch', capability, ctx, params);
   }
 
   /**
@@ -496,6 +511,9 @@ export class McpBridge {
       case 'update_crm_record': return x.updateCrmRecord(target, payload);
       case 'send_email': return x.sendEmail(target, payload);
       case 'deploy_package': return x.deployPackage(target, payload);
+      case 'create_milestone': return x.createMilestone(target, payload);
+      case 'create_label': return x.createLabel(target, payload);
+      case 'create_issue_batch': return x.createIssueBatch(target, payload);
     }
   }
 

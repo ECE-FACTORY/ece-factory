@@ -13,14 +13,14 @@ import { ApprovalGate, type ActionDescriptor } from '../approval-gate/approval-g
 import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../audit-engine/sequencer.js';
 
 // Phase 9.3 (OPEN_ITEM #9) — EXTERNAL-TIER SOLE-AUTHORITY PARITY. The Phase 8.8b PR-Engine capability pattern,
-// generalized to ALL SIX external actions BY CONSTRUCTION. The proofs, per action:
+// generalized to ALL NINE external actions BY CONSTRUCTION. The proofs, per action:
 //   (1) the generic externalActionWithTool REFUSES it (stage `encapsulated`) — the external port never runs;
 //   (2) its capability is UNFORGEABLE (the brand is a module-private symbol) and the capability-gated method
 //       cannot be called capability-less (type-level);
 //   (3) PER-ACTION BINDING — one action's capability cannot drive another (type-level AND runtime brand);
 //   (4) the UNCHANGED full 8.4 gauntlet runs behind the capability path (token / specific-target / no-bulk /
 //       kill-beats-approval / blast-radius audited);
-//   (5) BOUNDARY — exactly ONE owner module references each action's capability path (6/6);
+//   (5) BOUNDARY — exactly ONE owner module references each action's capability path (9/9);
 //   (6) EXTERNAL STAYS ON FAKES — zero real external calls on any path.
 
 // ── fakes ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -33,6 +33,9 @@ class XFakes implements ExternalSystems {
   updateCrmRecord(t: ExternalTarget) { return this.rec('update_crm_record', t); }
   sendEmail(t: ExternalTarget) { return this.rec('send_email', t); }
   deployPackage(t: ExternalTarget) { return this.rec('deploy_package', t); }
+  createMilestone(t: ExternalTarget) { return this.rec('create_milestone', t); }
+  createLabel(t: ExternalTarget) { return this.rec('create_label', t); }
+  createIssueBatch(t: ExternalTarget) { return this.rec('create_issue_batch', t); }
 }
 
 // Records intents (with the redacted blast-radius summary); refuses on a non-ALLOW authorize decision.
@@ -82,9 +85,12 @@ const ROWS: Row[] = [
   { action: 'update_crm_record', viaCapability: (b, c, p) => b.updateCrmRecord(b.grantUpdateCrmRecordCapability(), c, p), target: { system: 'crm', targetId: 'C-1', effect: 'update crm C-1', reversible: 'soft-only' } },
   { action: 'send_email', viaCapability: (b, c, p) => b.sendEmail(b.grantSendEmailCapability(), c, p), target: { system: 'email', targetId: 'a@x.com', effect: 'email a@x.com', reversible: 'no' } },
   { action: 'deploy_package', viaCapability: (b, c, p) => b.deployPackage(b.grantDeployPackageCapability(), c, p), target: { system: 'deploy', targetId: 'pkg-1', effect: 'deploy pkg-1 to dev', environment: 'dev', reversible: 'soft-only' } },
+  { action: 'create_milestone', viaCapability: (b, c, p) => b.createMilestone(b.grantCreateMilestoneCapability(), c, p), target: { system: 'github', targetId: 'ECE-FACTORY/x', effect: 'create milestone in ECE-FACTORY/x', reversible: 'soft-only' } },
+  { action: 'create_label', viaCapability: (b, c, p) => b.createLabel(b.grantCreateLabelCapability(), c, p), target: { system: 'github', targetId: 'ECE-FACTORY/x', effect: 'create label in ECE-FACTORY/x', reversible: 'soft-only' } },
+  { action: 'create_issue_batch', viaCapability: (b, c, p) => b.createIssueBatch(b.grantCreateIssueBatchCapability(), c, p), target: { system: 'github', targetId: 'ECE-FACTORY/x', effect: 'create issue batch in ECE-FACTORY/x', reversible: 'soft-only' } },
 ];
 
-describe('External sole-authority — the generic external path refuses ALL SIX (encapsulated); the port never runs', () => {
+describe('External sole-authority — the generic external path refuses ALL NINE (encapsulated); the port never runs', () => {
   for (const { action, target } of ROWS) {
     it(`externalActionWithTool("${action}") ⇒ refused (encapsulated); external port not reached`, async () => {
       const { bridge, externals } = build();
@@ -94,7 +100,7 @@ describe('External sole-authority — the generic external path refuses ALL SIX 
       expect(externals.calls).toHaveLength(0);
     });
   }
-  it('all six EXPOSED_EXTERNAL_TOOLS are encapsulated (the set the generic path refuses == the external surface)', () => {
+  it('all nine EXPOSED_EXTERNAL_TOOLS are encapsulated (the set the generic path refuses == the external surface)', () => {
     expect([...EXPOSED_EXTERNAL_TOOLS].sort()).toEqual([...EXTERNAL_TOOLS].sort());
   });
 });
@@ -173,7 +179,7 @@ describe('External sole-authority — the UNCHANGED full 8.4 gauntlet runs behin
   });
 });
 
-describe('External sole-authority — BOUNDARY: exactly ONE owner module references each action’s capability path (6/6)', () => {
+describe('External sole-authority — BOUNDARY: exactly ONE owner module references each action’s capability path (9/9)', () => {
   it('each grant<Action>Capability is referenced only by that action’s sanctioned owner module (src/ scan)', () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'); // src/
     // action → (unambiguous grant marker, the single sanctioned owner directory)
@@ -183,6 +189,9 @@ describe('External sole-authority — BOUNDARY: exactly ONE owner module referen
       { action: 'update_crm_record', marker: /grantUpdateCrmRecordCapability\(/, owner: 'features/external-gateways/' },
       { action: 'send_email', marker: /grantSendEmailCapability\(/, owner: 'features/external-gateways/' },
       { action: 'deploy_package', marker: /grantDeployPackageCapability\(/, owner: 'features/external-gateways/' },
+      { action: 'create_milestone', marker: /grantCreateMilestoneCapability\(/, owner: 'features/external-gateways/' },
+      { action: 'create_label', marker: /grantCreateLabelCapability\(/, owner: 'features/external-gateways/' },
+      { action: 'create_issue_batch', marker: /grantCreateIssueBatchCapability\(/, owner: 'features/external-gateways/' },
       { action: 'open_pull_request', marker: /grantPrOpenCapability\(|grantOpenPullRequestCapability\(/, owner: 'features/pr-engine/' },
     ];
     const files: string[] = [];

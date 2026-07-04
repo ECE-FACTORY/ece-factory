@@ -12,6 +12,7 @@ import type { ToolRegistrar } from './factory-read-tools.js';
 
 export const EXTERNAL_TOOLS = [
   'create_github_repo', 'open_pull_request', 'create_ticket', 'update_crm_record', 'send_email', 'deploy_package',
+  'create_milestone', 'create_label', 'create_issue_batch',
 ] as const;
 export type ExternalTool = (typeof EXTERNAL_TOOLS)[number];
 
@@ -55,7 +56,14 @@ export interface ExternalSystems {
   updateCrmRecord(target: ExternalTarget, payload?: Record<string, unknown>): Promise<ExternalResult>;
   sendEmail(target: ExternalTarget, payload?: Record<string, unknown>): Promise<ExternalResult>;
   deployPackage(target: ExternalTarget, payload?: Record<string, unknown>): Promise<ExternalResult>;
+  createMilestone(target: ExternalTarget, payload?: Record<string, unknown>): Promise<ExternalResult>;
+  createLabel(target: ExternalTarget, payload?: Record<string, unknown>): Promise<ExternalResult>;
+  /** Gated bulk: `payload.issues` is a FULLY-ENUMERATED, bounded, content-bound list (one approval = exactly this set). */
+  createIssueBatch(target: ExternalTarget, payload?: Record<string, unknown>): Promise<ExternalResult>;
 }
+
+/** Hard cap on a single content-bound issue batch — a batch cannot be an unbounded bulk vector. */
+export const MAX_ISSUE_BATCH = 15;
 
 /** Production/sensitive environments require the approval to name them explicitly. */
 export const PRODUCTION_ENVIRONMENTS: ReadonlySet<string> = new Set(['production', 'prod', 'sensitive']);
@@ -111,7 +119,7 @@ function forbiddenDef(name: ForbiddenTool, purpose: string): ToolDefinition {
   };
 }
 
-/** Register the 6 external-action tools. Deploy/repo-creation are admin-only. Idempotent per tool. */
+/** Register the 9 external-action tools. Deploy/repo-creation are admin-only. Idempotent per tool. */
 export function registerExternalTools(registry: ToolRegistrar): void {
   const defs: ToolDefinition[] = [
     externalDef('create_github_repo', 'Create a GitHub repository (one repo).', 'admin'),
@@ -120,6 +128,9 @@ export function registerExternalTools(registry: ToolRegistrar): void {
     externalDef('update_crm_record', 'Update one CRM record.', 'operator'),
     externalDef('send_email', 'Send one email.', 'operator'),
     externalDef('deploy_package', 'Deploy one package to one environment.', 'admin'),
+    externalDef('create_milestone', 'Create one milestone in one repo.', 'operator'),
+    externalDef('create_label', 'Create one label in one repo.', 'operator'),
+    externalDef('create_issue_batch', 'Create a bounded, content-bound batch of issues in one repo (one approval = exactly this enumerated set).', 'operator'),
   ];
   for (const def of defs) if (!registry.has(def.name)) registry.register(def);
 }

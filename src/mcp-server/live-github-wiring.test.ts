@@ -27,7 +27,7 @@ function mockFetch() {
 // the composite the composition root builds: create_github_repo → live adapter; the other five → throwing fake.
 function liveExternalSystems(github: LiveGitHubRepoAdapter): ExternalSystems {
   const nope = async (): Promise<never> => { throw new Error('fake this phase'); };
-  return { createGithubRepo: (t, p) => github.createGithubRepo(t, p), openPullRequest: nope, createTicket: nope, updateCrmRecord: nope, sendEmail: nope, deployPackage: nope };
+  return { createGithubRepo: (t, p) => github.createGithubRepo(t, p), openPullRequest: nope, createTicket: nope, updateCrmRecord: nope, sendEmail: nope, deployPackage: nope, createMilestone: nope, createLabel: nope, createIssueBatch: nope };
 }
 
 class FakeSequencer implements AuditedSequencerPort {
@@ -87,7 +87,7 @@ describe('Phase 9.4 — the live GitHub API is reached ONLY through gateway + ca
 });
 
 describe('Phase 9.4 — tier-status reports the external tier HONESTLY per-action (a fake is never live)', () => {
-  const base: TierWiring = { readRole: 'ece_app', writeRole: 'ece_writer', toolCounts: { read_only: 16, draft_only: 7, internal_write: 6, external: 6, forbidden: 6 } };
+  const base: TierWiring = { readRole: 'ece_app', writeRole: 'ece_writer', toolCounts: { read_only: 16, draft_only: 7, internal_write: 6, external: 9, forbidden: 6 } };
   const fake = { createGithubRepo: async () => ({}) };
   it('live create_github_repo + fake others ⇒ create_github_repo: live, others: fake, aggregate: partial', async () => {
     const github = new LiveGitHubRepoAdapter({ token: SECRET, fetchImpl: mockFetch().impl });

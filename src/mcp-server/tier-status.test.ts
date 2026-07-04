@@ -6,7 +6,7 @@ import { LiveWriteStores } from './live-write-adapters.js';
 // Tier-Status Reporter (Phase 9.2) — pure-logic. The CORE: status is derived from the REAL injected object's
 // class (instanceof a live adapter), never a label — so a fake can never be reported as live.
 
-const counts = { read_only: 16, draft_only: 7, internal_write: 6, external: 6, forbidden: 6 };
+const counts = { read_only: 16, draft_only: 7, internal_write: 6, external: 9, forbidden: 6 };
 function wiring(over: Partial<TierWiring> = {}): TierWiring {
   return { readRole: 'ece_app', writeRole: 'ece_writer', toolCounts: counts, ...over };
 }

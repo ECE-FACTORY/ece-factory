@@ -1,5 +1,6 @@
-// External Gateways (Phase 9.3, OPEN_ITEM #9) — the structural SOLE OWNERS of the five non-PR external
-// actions, exactly as the PR Engine (Module 30, Phase 8.8b) is the sole owner of `open_pull_request`.
+// External Gateways (Phase 9.3, OPEN_ITEM #9; extended with milestone/label/issue-batch) — the structural SOLE
+// OWNERS of the eight non-PR external actions, exactly as the PR Engine (Module 30, Phase 8.8b) is the sole
+// owner of `open_pull_request`.
 //
 // Each gateway holds its action's single, unforgeable, PER-ACTION `ExternalCapability` — granted once at
 // construction by the bridge and held by NO other module. It exposes a narrow typed request seam; a consumer
@@ -18,6 +19,7 @@
 
 import type { BridgeCallContext, ExternalCapability, ExternalOutcome } from '../mcp-bridge/mcp-bridge.js';
 import type { ExternalParams, ExternalTarget } from '../mcp-bridge/external-tools.js';
+import { MAX_ISSUE_BATCH } from '../mcp-bridge/external-tools.js';
 
 /** What a consumer hands a gateway: the exact external target, an optional payload, and the approval id. */
 export interface ExternalActionRequest {
@@ -114,5 +116,59 @@ export class DeployGateway {
   constructor(private readonly bridge: DeployPackageBridge) { this.capability = bridge.grantDeployPackageCapability(); }
   async deploy(request: ExternalActionRequest, ctx: BridgeCallContext): Promise<GatewayOutcome> {
     return toGatewayOutcome(await this.bridge.deployPackage(this.capability, ctx, toParams(request)));
+  }
+}
+
+// ── create_milestone ─────────────────────────────────────────────────────────────────────────────────────
+export interface CreateMilestoneBridge {
+  grantCreateMilestoneCapability(): ExternalCapability<'create_milestone'>;
+  createMilestone(capability: ExternalCapability<'create_milestone'>, ctx: BridgeCallContext, params?: ExternalParams): Promise<ExternalOutcome>;
+}
+/** Sole owner of `create_milestone`. */
+export class MilestoneGateway {
+  private readonly capability: ExternalCapability<'create_milestone'>;
+  constructor(private readonly bridge: CreateMilestoneBridge) { this.capability = bridge.grantCreateMilestoneCapability(); }
+  async createMilestone(request: ExternalActionRequest, ctx: BridgeCallContext): Promise<GatewayOutcome> {
+    return toGatewayOutcome(await this.bridge.createMilestone(this.capability, ctx, toParams(request)));
+  }
+}
+
+// ── create_label ─────────────────────────────────────────────────────────────────────────────────────────
+export interface CreateLabelBridge {
+  grantCreateLabelCapability(): ExternalCapability<'create_label'>;
+  createLabel(capability: ExternalCapability<'create_label'>, ctx: BridgeCallContext, params?: ExternalParams): Promise<ExternalOutcome>;
+}
+/** Sole owner of `create_label`. */
+export class LabelGateway {
+  private readonly capability: ExternalCapability<'create_label'>;
+  constructor(private readonly bridge: CreateLabelBridge) { this.capability = bridge.grantCreateLabelCapability(); }
+  async createLabel(request: ExternalActionRequest, ctx: BridgeCallContext): Promise<GatewayOutcome> {
+    return toGatewayOutcome(await this.bridge.createLabel(this.capability, ctx, toParams(request)));
+  }
+}
+
+// ── create_issue_batch (gated bulk — ONE content-bound, size-capped approval) ────────────────────────────
+export interface CreateIssueBatchBridge {
+  grantCreateIssueBatchCapability(): ExternalCapability<'create_issue_batch'>;
+  createIssueBatch(capability: ExternalCapability<'create_issue_batch'>, ctx: BridgeCallContext, params?: ExternalParams): Promise<ExternalOutcome>;
+}
+/**
+ * Sole owner of `create_issue_batch`. The batch is the reviewed unit: `request.payload.issues` is a FULLY
+ * ENUMERATED list. The gateway fails fast on an empty or over-cap batch (≤ MAX_ISSUE_BATCH) BEFORE anything
+ * reaches the gate — so an oversized batch can never become a pending action. The bounded, content-bound set
+ * then runs the UNCHANGED gauntlet, where the per-action approval binds the exact enumerated payload.
+ */
+export class IssueBatchGateway {
+  private readonly capability: ExternalCapability<'create_issue_batch'>;
+  constructor(private readonly bridge: CreateIssueBatchBridge) { this.capability = bridge.grantCreateIssueBatchCapability(); }
+  async createIssueBatch(request: ExternalActionRequest, ctx: BridgeCallContext): Promise<GatewayOutcome> {
+    const issues = (request.payload as { issues?: unknown } | undefined)?.issues;
+    if (!Array.isArray(issues) || issues.length === 0) {
+      return { status: 'refused', reason: 'issue batch must enumerate at least one issue (payload.issues)' };
+    }
+    if (issues.length > MAX_ISSUE_BATCH) {
+      return { status: 'refused', reason: `issue batch exceeds the hard cap of ${MAX_ISSUE_BATCH} (got ${issues.length}); split into separately-approved batches` };
+    }
+    return toGatewayOutcome(await this.bridge.createIssueBatch(this.capability, ctx, toParams(request)));
   }
 }

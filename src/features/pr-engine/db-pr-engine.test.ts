@@ -27,7 +27,7 @@ class FakeGitHub implements ExternalSystems {
   opened: ExternalTarget[] = [];
   async openPullRequest(t: ExternalTarget): Promise<{ ok: true }> { this.opened.push(t); return { ok: true }; }
   private nope = async (): Promise<never> => { throw new Error('not used'); };
-  createGithubRepo = this.nope; createTicket = this.nope; updateCrmRecord = this.nope; sendEmail = this.nope; deployPackage = this.nope;
+  createGithubRepo = this.nope; createTicket = this.nope; updateCrmRecord = this.nope; sendEmail = this.nope; deployPackage = this.nope; createMilestone = this.nope; createLabel = this.nope; createIssueBatch = this.nope;
 }
 const drafted: string[] = [];
 const DRAFTS: DraftPorts = {

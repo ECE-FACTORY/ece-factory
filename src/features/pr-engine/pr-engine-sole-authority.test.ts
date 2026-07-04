@@ -32,7 +32,7 @@ class XFakes implements ExternalSystems {
   opened = 0;
   async openPullRequest(_t: ExternalTarget): Promise<{ ok: true }> { this.opened++; return { ok: true }; }
   private nope = async (): Promise<never> => { throw new Error('not used'); };
-  createGithubRepo = this.nope; createTicket = this.nope; updateCrmRecord = this.nope; sendEmail = this.nope; deployPackage = this.nope;
+  createGithubRepo = this.nope; createTicket = this.nope; updateCrmRecord = this.nope; sendEmail = this.nope; deployPackage = this.nope; createMilestone = this.nope; createLabel = this.nope; createIssueBatch = this.nope;
 }
 function ctx(): BridgeCallContext {
   return { principal: { user_id: 'op', email: 'o@e', role: 'operator' }, organization_id: 'orgSA', session: { session_id: 's' }, environment: 'local', via: 'claude-code' };
