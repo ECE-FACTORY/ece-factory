@@ -1,19 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { DecisionConsoleServer, type ActionProposer, type ApprovedActionCommitter } from './decision-console-server.js';
 import { StopEnqueuer, observingGatewayCall, type GatewayCall } from './decision-console-wiring.js';
-import { DecisionConsole, InMemoryConsoleAudit } from '../features/decision-console/decision-console.js';
-import { RepoCreationGateway, TicketGateway, type ExternalActionRequest } from '../features/external-gateways/external-gateways.js';
-import { ApprovalGate, type Principal } from '../features/approval-gate/approval-gate.js';
-import { McpBridge, type BridgeCallContext, type AuditedSequencerPort } from '../features/mcp-bridge/mcp-bridge.js';
-import { registerExternalTools, registerForbiddenTools, type ExternalSystems, type ExternalTarget } from '../features/mcp-bridge/external-tools.js';
-import { registerWriteTools, type WriteStores } from '../features/mcp-bridge/write-tools.js';
-import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-tools.js';
-import { registerDraftTools } from '../features/mcp-bridge/draft-tools.js';
-import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
-import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
-import { PermissionEngine } from '../features/permission-engine/permission-engine.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../features/audit-engine/sequencer.js';
+import { DecisionConsole, InMemoryConsoleAudit } from '../layer-2-command/decision-console/decision-console.js';
+import { RepoCreationGateway, TicketGateway, type ExternalActionRequest } from '../layer-5-action/external-gateways/external-gateways.js';
+import { ApprovalGate, type Principal } from '../layer-1-law/approval-gate/approval-gate.js';
+import { McpBridge, type BridgeCallContext, type AuditedSequencerPort } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { registerExternalTools, registerForbiddenTools, type ExternalSystems, type ExternalTarget } from '../layer-5-action/mcp-bridge/external-tools.js';
+import { registerWriteTools, type WriteStores } from '../layer-5-action/mcp-bridge/write-tools.js';
+import { registerFactoryReadTools } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import { registerDraftTools } from '../layer-5-action/mcp-bridge/draft-tools.js';
+import { BridgeApprovalGate } from '../layer-5-action/mcp-bridge/tool-classes.js';
+import { createDefaultToolRegistry } from '../layer-5-action/tool-registry/tool-registry.js';
+import { PermissionEngine } from '../layer-1-law/permission-engine/permission-engine.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../factory-shared/audit-engine/sequencer.js';
 
 // Wave 6 Piece 1d — the PROPOSE surface (Design 2, strict). Composition-root/transport only: a loopback-only,
 // secret-gated route that lets the AI conduit INITIATE an external action into the SAME Console queue where a

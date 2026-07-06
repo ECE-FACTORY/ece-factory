@@ -17,7 +17,7 @@
 // misused to perform any other action. The other five external actions stay on fakes this phase (the
 // composition root routes them to the fake, never here).
 
-import type { ExternalTarget, ExternalResult } from '../features/mcp-bridge/external-tools.js';
+import type { ExternalTarget, ExternalResult } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 /** The narrow port this adapter satisfies — exactly the one external action it owns. */
 export interface RepoCreator {

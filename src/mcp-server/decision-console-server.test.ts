@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DecisionConsoleServer, type OperatorSeat } from './decision-console-server.js';
-import type { PendingItem, ConsoleDecisionOutcome } from '../features/decision-console/decision-console.js';
-import type { Principal } from '../features/approval-gate/approval-gate.js';
+import type { PendingItem, ConsoleDecisionOutcome } from '../layer-2-command/decision-console/decision-console.js';
+import type { Principal } from '../layer-1-law/approval-gate/approval-gate.js';
 
 // Wave 6 Piece 1 — the operator UI carries a REAL operator identity: established by explicit login, flowed to
 // the seam as the approver. NEVER hardcoded, NEVER read from the request body, NEVER derived from the caller.

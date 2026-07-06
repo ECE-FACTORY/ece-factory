@@ -15,7 +15,7 @@ import { LiveGitHubIssueAdapter } from './live-github-issue-adapter.js';
 import { LiveGitHubMilestoneAdapter } from './live-github-milestone-adapter.js';
 import { LiveGitHubLabelAdapter } from './live-github-label-adapter.js';
 import { LiveGitHubIssueBatchAdapter } from './live-github-issue-batch-adapter.js';
-import { EXTERNAL_TOOLS, type ExternalTool } from '../features/mcp-bridge/external-tools.js';
+import { EXTERNAL_TOOLS, type ExternalTool } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 export type TierBacking = 'live' | 'fake' | 'disabled' | 'not-wired';
 /** The external tier can be MIXED once some actions go live and others stay fake (Phase 9.4). */

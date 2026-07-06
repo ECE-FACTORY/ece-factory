@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { PolicyGatedSeat, InMemoryPolicyAudit, factsFromPendingItem, type PolicyPendingItem } from './policy-console-wiring.js';
 import { DecisionConsoleServer, type OperatorSeat } from './decision-console-server.js';
-import { PolicyEngine } from '../features/policy-engine/policy-engine.js';
-import { DEFAULT_POLICY_SET } from '../features/policy-engine/example-rules.js';
-import { DecisionConsole, InMemoryConsoleAudit, type EnqueueMeta, type PendingItem, type ConsoleDecisionOutcome } from '../features/decision-console/decision-console.js';
-import { ApprovalGate, type ActionDescriptor, type Principal } from '../features/approval-gate/approval-gate.js';
+import { PolicyEngine } from '../layer-1-law/policy-engine/policy-engine.js';
+import { DEFAULT_POLICY_SET } from '../layer-1-law/policy-engine/example-rules.js';
+import { DecisionConsole, InMemoryConsoleAudit, type EnqueueMeta, type PendingItem, type ConsoleDecisionOutcome } from '../layer-2-command/decision-console/decision-console.js';
+import { ApprovalGate, type ActionDescriptor, type Principal } from '../layer-1-law/approval-gate/approval-gate.js';
 
 const OPERATOR: Principal = { user_id: 'human_boss', email: 'b@e', role: 'admin' };
 const engine = new PolicyEngine(DEFAULT_POLICY_SET);

@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { PolicyChangeService, InMemoryPolicyChangeAudit, POLICY_CHANGE_TOOL, type ApprovalReader } from './policy-change-wiring.js';
 import { PolicyGatedSeat, InMemoryPolicyAudit } from './policy-console-wiring.js';
-import { PolicyStore } from '../features/policy-engine/policy-store.js';
-import { DEFAULT_POLICY_SET } from '../features/policy-engine/example-rules.js';
-import type { PolicyActionFacts } from '../features/policy-engine/policy-engine.js';
-import { DecisionConsole, InMemoryConsoleAudit, type EnqueueMeta } from '../features/decision-console/decision-console.js';
-import { ApprovalGate, type ActionDescriptor, type Principal } from '../features/approval-gate/approval-gate.js';
+import { PolicyStore } from '../layer-1-law/policy-engine/policy-store.js';
+import { DEFAULT_POLICY_SET } from '../layer-1-law/policy-engine/example-rules.js';
+import type { PolicyActionFacts } from '../layer-1-law/policy-engine/policy-engine.js';
+import { DecisionConsole, InMemoryConsoleAudit, type EnqueueMeta } from '../layer-2-command/decision-console/decision-console.js';
+import { ApprovalGate, type ActionDescriptor, type Principal } from '../layer-1-law/approval-gate/approval-gate.js';
 
 // Wave 6 Piece 3 — policy-change-as-gated-write reusing the EXISTING gate/Console approval (single operator).
 // Proposed change is INERT until approved; after a real operator approval it is applied + audited; the AI

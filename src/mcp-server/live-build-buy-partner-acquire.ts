@@ -3,19 +3,19 @@
 // Phase-2 (Internal Reuse) → Phase-3 (External Harvest, only if internal is absent) → Phase-4 (unify) end-to-end.
 // Thin composition: NO guard logic, NO gate/bridge, NO mutation — it resolves the two legs' outputs.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
-import type { InternalReuseEngine, NeededCapability } from '../features/internal-reuse-engine/internal-reuse-engine.js';
-import type { ExternalHarvestComposer, ExternalCandidate } from '../features/external-harvest-composer/external-harvest-composer.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
+import type { InternalReuseEngine, NeededCapability } from '../layer-3-harvest/internal-reuse-engine/internal-reuse-engine.js';
+import type { ExternalHarvestComposer, ExternalCandidate } from '../layer-3-harvest/external-harvest-composer/external-harvest-composer.js';
 import {
   BuildBuyPartnerAcquireEngine,
   UnifiedSourcingAuditor,
   BBPA_AUDIT_ALLOWLIST,
   type StrategicSignal,
   type UnifiedSourcingDecision,
-} from '../features/build-buy-partner-acquire/build-buy-partner-acquire.js';
+} from '../layer-6-venture-intel/build-buy-partner-acquire/build-buy-partner-acquire.js';
 
 /** The factory's Build/Buy/Partner/Acquire engine (structural, plan-only). */
 export function factoryBuildBuyPartnerAcquireEngine(): BuildBuyPartnerAcquireEngine {

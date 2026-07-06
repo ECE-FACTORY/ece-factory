@@ -6,12 +6,12 @@
 
 import { mkdirSync, writeFileSync, copyFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import { classifyLicense } from '../features/license-compliance/license-compliance.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import { classifyLicense } from '../layer-3-harvest/license-compliance/license-compliance.js';
 import { nodeArtifactProbe } from './live-build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   AppPackagingFlow,
   PackagingAuditor,
@@ -25,7 +25,7 @@ import {
   type PackageManifest,
   type RawDependency,
   type PackagingConfig,
-} from '../features/app-packaging/app-packaging.js';
+} from '../layer-4-build-harden/app-packaging/app-packaging.js';
 
 /**
  * DEFAULT Mac bundler — produces a structured `<name>-<version>.app` directory (Contents/MacOS + Resources +

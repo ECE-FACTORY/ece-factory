@@ -5,11 +5,11 @@
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
-import type { FeatureEntry } from '../features/feature-registry/feature-registry.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
+import type { FeatureEntry } from '../layer-4-build-harden/feature-registry/feature-registry.js';
 import {
   buildCapabilityGraph,
   CapabilityReuseGraph,
@@ -18,7 +18,7 @@ import {
   type CapabilityFacts,
   type RawModuleFact,
   type RawTableFact,
-} from '../features/capability-reuse-graph/capability-reuse-graph.js';
+} from '../factory-shared/capability-reuse-graph/capability-reuse-graph.js';
 
 const ENGINE_RE = /-(engine|registry|gate|bridge|checker|scheduler|spine|builder)$/;
 
@@ -38,36 +38,57 @@ export function deriveTableFacts(repoRoot: string): RawTableFact[] {
   return tables;
 }
 
-/** Derive one structural fact per src/features module by re-reading the repo (deterministic; no opinion). */
+/** The layer directories a factory module can live in after the six-layer restructure.
+ *  factory-shared holds cross-cutting infra; the six layer-* dirs hold the layered modules.
+ *  (Pre-restructure 'features' is included for backward-compat so the derivation works in both layouts.) */
+const MODULE_PARENT_DIRS = [
+  'features',
+  'factory-shared',
+  'layer-1-law',
+  'layer-2-command',
+  'layer-3-harvest',
+  'layer-4-build-harden',
+  'layer-5-action',
+  'layer-6-venture-intel',
+];
+
+/** Derive one structural fact per factory module by re-reading the repo (deterministic; no opinion).
+ *  Walks every layer directory so the capability graph reflects the six-layer architecture. */
 export function deriveModuleFacts(repoRoot: string, tableNames: string[]): RawModuleFact[] {
-  const featuresDir = path.join(repoRoot, 'src', 'features');
   const out: RawModuleFact[] = [];
-  if (!existsSync(featuresDir)) return out;
-  for (const name of readdirSync(featuresDir).sort()) {
-    const modDir = path.join(featuresDir, name);
-    if (!statSync(modDir).isDirectory()) continue;
-    const files = readdirSync(modDir);
-    const tsFiles = files.filter((f) => f.endsWith('.ts'));
-    if (tsFiles.length === 0) continue;
-    const tests = files.filter((f) => f.endsWith('.test.ts')).map((f) => `src/features/${name}/${f}`).sort();
-    const docs = files.filter((f) => f.endsWith('.feature.md') || f.endsWith('.md')).map((f) => `src/features/${name}/${f}`).sort();
-    // concatenate the NON-test source for posture derivation
-    const src = tsFiles.filter((f) => !f.endsWith('.test.ts')).map((f) => { try { return readFileSync(path.join(modDir, f), 'utf8'); } catch { return ''; } }).join('\n');
-    const dbTables = tableNames.filter((t) => new RegExp(`\\b${t}\\b`).test(src)).sort();
-    out.push({
-      name,
-      path: `src/features/${name}`,
-      kind: ENGINE_RE.test(name) ? 'engine' : 'feature',
-      description: firstDocLine(src),
-      hasTests: tests.length > 0,
-      documented: docs.some((d) => d.endsWith('.feature.md')),
-      hasAudit: /audit-engine|appendRead|AuditSink|PostgresHashChainSink|hash-chain/i.test(src),
-      hasRedaction: /redaction-engine|RedactionEngine|redactSummary|SecretPatternRedactor/i.test(src),
-      packageable: /STANDALONE-PACKAGEABLE/i.test(src),
-      tests,
-      docs,
-      dbTables,
-    });
+  const seenNames = new Set<string>();
+  for (const parent of MODULE_PARENT_DIRS) {
+    const parentDir = path.join(repoRoot, 'src', parent);
+    if (!existsSync(parentDir)) continue;
+    for (const name of readdirSync(parentDir).sort()) {
+      const modDir = path.join(parentDir, name);
+      if (!statSync(modDir).isDirectory()) continue;
+      if (seenNames.has(name)) continue; // a module lives in exactly one layer; first hit wins
+      const files = readdirSync(modDir);
+      const tsFiles = files.filter((f) => f.endsWith('.ts'));
+      if (tsFiles.length === 0) continue;
+      seenNames.add(name);
+      const relBase = `src/${parent}/${name}`;
+      const tests = files.filter((f) => f.endsWith('.test.ts')).map((f) => `${relBase}/${f}`).sort();
+      const docs = files.filter((f) => f.endsWith('.feature.md') || f.endsWith('.md')).map((f) => `${relBase}/${f}`).sort();
+      // concatenate the NON-test source for posture derivation
+      const src = tsFiles.filter((f) => !f.endsWith('.test.ts')).map((f) => { try { return readFileSync(path.join(modDir, f), 'utf8'); } catch { return ''; } }).join('\n');
+      const dbTables = tableNames.filter((t) => new RegExp(`\\b${t}\\b`).test(src)).sort();
+      out.push({
+        name,
+        path: relBase,
+        kind: ENGINE_RE.test(name) ? 'engine' : 'feature',
+        description: firstDocLine(src),
+        hasTests: tests.length > 0,
+        documented: docs.some((d) => d.endsWith('.feature.md')),
+        hasAudit: /audit-engine|appendRead|AuditSink|PostgresHashChainSink|hash-chain/i.test(src),
+        hasRedaction: /redaction-engine|RedactionEngine|redactSummary|SecretPatternRedactor/i.test(src),
+        packageable: /STANDALONE-PACKAGEABLE/i.test(src),
+        tests,
+        docs,
+        dbTables,
+      });
+    }
   }
   return out;
 }

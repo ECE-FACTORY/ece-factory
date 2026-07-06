@@ -5,16 +5,16 @@
 // composer over the cited facts satisfies the discipline); if one is added later, the FACTS must still come from
 // the graph and no secret/key may enter its prompts or the audit. Mirrors the Category-Creation adapter.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   MoatEngine,
   MoatAssessmentAuditor,
   MOAT_AUDIT_ALLOWLIST,
   type GraphReader,
-} from '../features/moat-engine/moat-engine.js';
+} from '../layer-6-venture-intel/moat-engine/moat-engine.js';
 
 /** The advisory Moat engine, grounded on an already-built graph (the Phase-1 CapabilityReuseGraph satisfies
  *  GraphReader structurally). Uses the Observer's secret scrubber on the concept text + basis. */

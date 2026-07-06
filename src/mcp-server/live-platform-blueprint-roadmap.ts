@@ -7,16 +7,16 @@
 // deterministic/re-derivable, the JUDGMENT half's FACTS must still come from the graph, and no secret/key may enter
 // its prompts or the audit. Mirrors the prior VI adapters.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   PlatformBlueprintRoadmapEngine,
   PlatformBlueprintRoadmapAuditor,
   MIXED_AUDIT_ALLOWLIST,
   type GraphReader,
-} from '../features/platform-blueprint-roadmap/platform-blueprint-roadmap.js';
+} from '../layer-6-venture-intel/platform-blueprint-roadmap/platform-blueprint-roadmap.js';
 
 /** The mixed Platform Blueprint / Venture Roadmap engine, grounded on an already-built graph (the Phase-1
  *  CapabilityReuseGraph satisfies GraphReader structurally). Uses the Observer's secret scrubber. */

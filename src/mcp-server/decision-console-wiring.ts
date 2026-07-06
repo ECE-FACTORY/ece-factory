@@ -15,16 +15,16 @@
 // core are injected as ports so it is unit-testable with fakes.
 
 import type { McpServerCore, McpCallResult } from './server-core.js';
-import type { BridgeCallContext } from '../features/mcp-bridge/mcp-bridge.js';
-import { EXPOSED_EXTERNAL_TOOLS } from '../features/mcp-bridge/mcp-bridge.js';
-import { canonicalPayload } from '../features/mcp-bridge/tool-classes.js';
-import type { ActionDescriptor } from '../features/approval-gate/approval-gate.js';
-import type { ExternalParams, ExternalTarget } from '../features/mcp-bridge/external-tools.js';
-import type { WriteParams } from '../features/mcp-bridge/write-tools.js';
-import type { DecisionConsole, EnqueueMeta, ConsoleAuditSink, ConsoleAuditEvent } from '../features/decision-console/decision-console.js';
-import type { GatewayOutcome, ExternalActionRequest } from '../features/external-gateways/external-gateways.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, SessionInfo, Environment } from '../features/audit-engine/schema.js';
+import type { BridgeCallContext } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { EXPOSED_EXTERNAL_TOOLS } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { canonicalPayload } from '../layer-5-action/mcp-bridge/tool-classes.js';
+import type { ActionDescriptor } from '../layer-1-law/approval-gate/approval-gate.js';
+import type { ExternalParams, ExternalTarget } from '../layer-5-action/mcp-bridge/external-tools.js';
+import type { WriteParams } from '../layer-5-action/mcp-bridge/write-tools.js';
+import type { DecisionConsole, EnqueueMeta, ConsoleAuditSink, ConsoleAuditEvent } from '../layer-2-command/decision-console/decision-console.js';
+import type { GatewayOutcome, ExternalActionRequest } from '../layer-5-action/external-gateways/external-gateways.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, SessionInfo, Environment } from '../factory-shared/audit-engine/schema.js';
 
 // ── (2) Postgres-backed Console audit ────────────────────────────────────────────────────────────────────
 /**

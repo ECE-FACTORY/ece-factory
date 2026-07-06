@@ -5,15 +5,15 @@
 // the existing gated pipeline; the composer never routes/proposes-into-pipeline/approves/executes. No LLM is wired;
 // if one is added later it does not change any structural guarantee. Mirrors the prior VI adapters.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   VentureBlueprintComposer,
   VentureBlueprintAuditor,
   BLUEPRINT_AUDIT_ALLOWLIST,
-} from '../features/venture-blueprint-composer/venture-blueprint-composer.js';
+} from '../layer-6-venture-intel/venture-blueprint-composer/venture-blueprint-composer.js';
 
 /** The pure-unifier Venture Blueprint Composer. Uses the Observer's secret scrubber on the concept + proposals. */
 export function factoryVentureBlueprintComposer(): VentureBlueprintComposer {

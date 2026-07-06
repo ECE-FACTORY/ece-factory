@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
-import type { ExternalTarget } from '../features/mcp-bridge/external-tools.js';
+import type { ExternalTarget } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 // OPT-IN real-API test — SKIPPED by default. It runs ONLY when the human sets ECE_LIVE_GITHUB_TEST=1 AND
 // provides ECE_GITHUB_TOKEN. It creates a clearly-named THROWAWAY repo via the real GitHub API, then prints

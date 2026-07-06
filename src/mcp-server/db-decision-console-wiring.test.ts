@@ -2,9 +2,9 @@ import { describe, it, expect, afterAll } from 'vitest';
 import pkg from 'pg';
 const { Pool } = pkg;
 import { PostgresConsoleAudit } from './decision-console-wiring.js';
-import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import type { ConsoleAuditEvent } from '../features/decision-console/decision-console.js';
+import { PostgresHashChainSink } from '../factory-shared/audit-engine/postgres-sink.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import type { ConsoleAuditEvent } from '../layer-2-command/decision-console/decision-console.js';
 
 // Wave 6 Piece 1b — Console audit is durably recorded in the REAL append-only, hash-chained audit store
 // (PostgreSQL), operator-attributed. No mocks on the audit path.

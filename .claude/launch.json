@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mcp-server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "mcp:server"],
+      "port": 4319
+    },
+    {
+      "name": "operator-cockpit",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/mcp-server/run-cockpit.mjs"],
+      "port": 4400
+    }
+  ]
+}

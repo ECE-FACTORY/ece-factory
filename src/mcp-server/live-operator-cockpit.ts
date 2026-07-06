@@ -4,8 +4,8 @@
 // handed the EXISTING read functions (Console queue, delivery-chain latest, the plan-only venture orchestrator, the
 // audit sink, machine status). Mirrors the prior live-* adapters; adds no action path.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
 import {
   OperatorCockpit,
   COCKPIT_AUDIT_ALLOWLIST,
@@ -16,11 +16,11 @@ import {
   type AuditReader,
   type MachineStatusReader,
   type ProposeSurface,
-} from '../features/operator-cockpit/operator-cockpit.js';
-import { VentureOrchestrator } from '../features/operator-cockpit/venture-orchestrator.js';
-import type { GraphReader } from '../features/category-creation/category-creation.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+} from '../layer-5-action/operator-cockpit/operator-cockpit.js';
+import { VentureOrchestrator } from '../layer-5-action/operator-cockpit/venture-orchestrator.js';
+import type { GraphReader } from '../layer-6-venture-intel/category-creation/category-creation.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 
 /** Service identity for cockpit route-audit evidence (a service actor, never 'claude'/a fake human). */
 export const COCKPIT_ACTOR: HumanActor = { user_id: 'operator-cockpit', email: '', role: 'service' };

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LiveGitHubRepoAdapter, parseRepoTarget } from './live-github-adapter.js';
-import type { ExternalTarget } from '../features/mcp-bridge/external-tools.js';
+import type { ExternalTarget } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 // Phase 9.4 — Live GitHub adapter (create_github_repo ONLY). NO real network: a mock `fetchImpl` is injected;
 // the real-API path is exercised against the mock so no real repo is ever created in the suite.

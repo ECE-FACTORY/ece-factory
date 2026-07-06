@@ -3,18 +3,18 @@ import pkg from 'pg';
 const { Pool } = pkg;
 import { McpServerCore } from './server-core.js';
 import { LiveWriteStores } from './live-write-adapters.js';
-import { McpBridge, type BridgeCallContext } from '../features/mcp-bridge/mcp-bridge.js';
-import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
-import { registerFactoryReadTools, type FactoryReadPorts } from '../features/mcp-bridge/factory-read-tools.js';
-import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draft-tools.js';
-import { registerWriteTools } from '../features/mcp-bridge/write-tools.js';
-import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../features/mcp-bridge/external-tools.js';
-import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
-import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
-import { WriteAheadSequencer } from '../features/audit-engine/sequencer.js';
-import { PermissionEngine } from '../features/permission-engine/permission-engine.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { ApprovalGate, type ActionDescriptor } from '../features/approval-gate/approval-gate.js';
+import { McpBridge, type BridgeCallContext } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { createDefaultToolRegistry } from '../layer-5-action/tool-registry/tool-registry.js';
+import { registerFactoryReadTools, type FactoryReadPorts } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import { registerDraftTools, type DraftPorts } from '../layer-5-action/mcp-bridge/draft-tools.js';
+import { registerWriteTools } from '../layer-5-action/mcp-bridge/write-tools.js';
+import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../layer-5-action/mcp-bridge/external-tools.js';
+import { BridgeApprovalGate } from '../layer-5-action/mcp-bridge/tool-classes.js';
+import { PostgresHashChainSink } from '../factory-shared/audit-engine/postgres-sink.js';
+import { WriteAheadSequencer } from '../factory-shared/audit-engine/sequencer.js';
+import { PermissionEngine } from '../layer-1-law/permission-engine/permission-engine.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { ApprovalGate, type ActionDescriptor } from '../layer-1-law/approval-gate/approval-gate.js';
 
 // Phase 9.1 — the internal-write tier wired LIVE to real append-only stores. NO mocks on the write path:
 // an approved write actually lands a row in the real table; no-token writes nothing; the Phase 8.3 token gate
@@ -123,7 +123,7 @@ describe('Phase 9.1 — self-approval rejected & kill-beats-approval against the
     expect(await countOpenItems()).toBe(before);
   });
   it('kill beats approval — a kill-switched live write ⇒ REFUSE even with a valid token, no row', async () => {
-    const { InMemoryKillSwitch } = await import('../features/kill-switch/kill-switch.js');
+    const { InMemoryKillSwitch } = await import('../layer-1-law/kill-switch/kill-switch.js');
     const kill = new InMemoryKillSwitch();
     kill.activate({ type: 'tool', name: 'create_open_item' }, 'admin', 'freeze');
     const killBridge = new McpBridge(registry, new WriteAheadSequencer(sink, new PermissionEngine(registry, { killSwitch: kill })),

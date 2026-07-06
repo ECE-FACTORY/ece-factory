@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LiveGitHubIssueAdapter, parseIssueRepo } from './live-github-issue-adapter.js';
-import type { ExternalTarget } from '../features/mcp-bridge/external-tools.js';
+import type { ExternalTarget } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 // Phase 9.5 — Live GitHub Issue adapter (create_ticket ONLY). NO real network: a mock `fetchImpl` is injected.
 

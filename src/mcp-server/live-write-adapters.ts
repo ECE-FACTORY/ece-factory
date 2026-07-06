@@ -7,7 +7,7 @@
 // privilege. Used by the composition root (server.ts); the external tier stays on fakes this phase.
 
 import type { Pool } from 'pg';
-import type { WriteStores, WriteParams, WriteRecord } from '../features/mcp-bridge/write-tools.js';
+import type { WriteStores, WriteParams, WriteRecord } from '../layer-5-action/mcp-bridge/write-tools.js';
 
 export class LiveWriteStores implements WriteStores {
   constructor(private readonly pool: Pool) {}

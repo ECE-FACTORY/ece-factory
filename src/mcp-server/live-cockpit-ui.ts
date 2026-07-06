@@ -5,9 +5,9 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CockpitUiServer, type SurfaceDispatcher, type CockpitUiServerOptions } from '../features/operator-cockpit-ui/cockpit-ui-server.js';
+import { CockpitUiServer, type SurfaceDispatcher, type CockpitUiServerOptions } from '../layer-5-action/operator-cockpit-ui/cockpit-ui-server.js';
 import { factoryOperatorCockpit, factoryVentureOrchestrator } from './live-operator-cockpit.js';
-import type { OperatorCockpit } from '../features/operator-cockpit/operator-cockpit.js';
+import type { OperatorCockpit } from '../layer-5-action/operator-cockpit/operator-cockpit.js';
 import { factoryCapabilityGraph } from './live-capability-reuse-graph.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');

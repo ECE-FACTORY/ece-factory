@@ -6,16 +6,16 @@
 // satisfies the discipline); if one is added later, the FACTS must still come from the graph, no company may be
 // asserted as fact, and no secret/key may enter its prompts or the audit. Mirrors the prior judgment adapters.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   AcquisitionPartnerTargetEngine,
   AcquisitionPartnerAuditor,
   ACQPARTNER_AUDIT_ALLOWLIST,
   type GraphReader,
-} from '../features/acquisition-partner-target/acquisition-partner-target.js';
+} from '../layer-6-venture-intel/acquisition-partner-target/acquisition-partner-target.js';
 
 /** The advisory Acquisition/Partner Target engine, grounded on an already-built graph (the Phase-1
  *  CapabilityReuseGraph satisfies GraphReader structurally). Uses the Observer's secret scrubber. */

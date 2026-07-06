@@ -2,8 +2,8 @@ import { describe, it, expect, afterAll } from 'vitest';
 import pkg from 'pg';
 const { Pool } = pkg;
 import { PostgresPolicyAudit, type PolicyAuditEvent } from './policy-console-wiring.js';
-import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
+import { PostgresHashChainSink } from '../factory-shared/audit-engine/postgres-sink.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
 
 // Wave 6 Piece 2 — policy evaluations + override reasons are durably audited in the real append-only,
 // hash-chained store, operator-attributed. No mocks on the audit path.

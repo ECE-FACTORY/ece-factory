@@ -4,22 +4,22 @@ const { Pool } = pkg;
 import { McpServerCore } from './server-core.js';
 import { LiveFactoryReadPorts, type LiveReadSources } from './live-read-adapters.js';
 import { handleRpc } from './server.js';
-import { McpBridge, EXPOSED_TOOLS, type BridgeCallContext } from '../features/mcp-bridge/mcp-bridge.js';
-import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
-import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-tools.js';
-import { registerDraftTools, type DraftPorts } from '../features/mcp-bridge/draft-tools.js';
-import { registerWriteTools, type WriteStores } from '../features/mcp-bridge/write-tools.js';
-import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../features/mcp-bridge/external-tools.js';
-import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
-import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
-import { WriteAheadSequencer } from '../features/audit-engine/sequencer.js';
-import { PermissionEngine } from '../features/permission-engine/permission-engine.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { ApprovalGate } from '../features/approval-gate/approval-gate.js';
-import { PostgresRiskRegisterStore } from '../features/risk-register/postgres-risk-store.js';
-import { PostgresDomainRegistryStore } from '../features/domain-registry/postgres-domain-store.js';
-import { PostgresProjectRegistryStore } from '../features/project-registry/postgres-project-store.js';
-import { PostgresClientReadModel } from '../features/mcp-bridge/postgres-client-readmodel.js';
+import { McpBridge, EXPOSED_TOOLS, type BridgeCallContext } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { createDefaultToolRegistry } from '../layer-5-action/tool-registry/tool-registry.js';
+import { registerFactoryReadTools } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import { registerDraftTools, type DraftPorts } from '../layer-5-action/mcp-bridge/draft-tools.js';
+import { registerWriteTools, type WriteStores } from '../layer-5-action/mcp-bridge/write-tools.js';
+import { registerExternalTools, registerForbiddenTools, type ExternalSystems } from '../layer-5-action/mcp-bridge/external-tools.js';
+import { BridgeApprovalGate } from '../layer-5-action/mcp-bridge/tool-classes.js';
+import { PostgresHashChainSink } from '../factory-shared/audit-engine/postgres-sink.js';
+import { WriteAheadSequencer } from '../factory-shared/audit-engine/sequencer.js';
+import { PermissionEngine } from '../layer-1-law/permission-engine/permission-engine.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { ApprovalGate } from '../layer-1-law/approval-gate/approval-gate.js';
+import { PostgresRiskRegisterStore } from '../factory-shared/risk-register/postgres-risk-store.js';
+import { PostgresDomainRegistryStore } from '../factory-shared/domain-registry/postgres-domain-store.js';
+import { PostgresProjectRegistryStore } from '../factory-shared/project-registry/postgres-project-store.js';
+import { PostgresClientReadModel } from '../layer-5-action/mcp-bridge/postgres-client-readmodel.js';
 
 // MCP Server entrypoint — end-to-end against REAL PostgreSQL. Proves the LIVE READ_ONLY tier returns real
 // data through the full guard stack (audited + redacted), the server DB role is SELECT-only on the system of

@@ -4,16 +4,16 @@
 // only generates a report and records it. It launches NOTHING — executing a preview command is the operator's
 // action (or the Observer's local, non-consequential spawn), never a gated external action.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   LocalPreviewGenerator,
   PreviewAuditor,
   PREVIEW_AUDIT_ALLOWLIST,
   type PreviewManifest,
-} from '../features/local-preview/local-preview.js';
+} from '../layer-4-build-harden/local-preview/local-preview.js';
 
 /** The factory's Preview/Status generator, reusing the Observer's free-text secret scrubber. */
 export function factoryPreviewGenerator(): LocalPreviewGenerator {

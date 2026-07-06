@@ -2,15 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { LiveGitHubIssueAdapter } from './live-github-issue-adapter.js';
 import { LiveGitHubRepoAdapter } from './live-github-adapter.js';
 import { buildTierStatusReport, type TierWiring } from './tier-status.js';
-import { McpBridge, type BridgeCallContext, type AuditedSequencerPort } from '../features/mcp-bridge/mcp-bridge.js';
-import { registerExternalTools, registerForbiddenTools, type ExternalSystems, type ExternalTarget } from '../features/mcp-bridge/external-tools.js';
-import { TicketGateway } from '../features/external-gateways/external-gateways.js';
-import { BridgeApprovalGate } from '../features/mcp-bridge/tool-classes.js';
-import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
-import { PermissionEngine } from '../features/permission-engine/permission-engine.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { ApprovalGate, type ActionDescriptor } from '../features/approval-gate/approval-gate.js';
-import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../features/audit-engine/sequencer.js';
+import { McpBridge, type BridgeCallContext, type AuditedSequencerPort } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { registerExternalTools, registerForbiddenTools, type ExternalSystems, type ExternalTarget } from '../layer-5-action/mcp-bridge/external-tools.js';
+import { TicketGateway } from '../layer-5-action/external-gateways/external-gateways.js';
+import { BridgeApprovalGate } from '../layer-5-action/mcp-bridge/tool-classes.js';
+import { createDefaultToolRegistry } from '../layer-5-action/tool-registry/tool-registry.js';
+import { PermissionEngine } from '../layer-1-law/permission-engine/permission-engine.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { ApprovalGate, type ActionDescriptor } from '../layer-1-law/approval-gate/approval-gate.js';
+import type { Authorizer, SequencerRequest, SequencerOutcome, ExecuteFn, CommittedIntent, RefusalRequest } from '../factory-shared/audit-engine/sequencer.js';
 
 // Phase 9.5 — create_ticket wired LIVE (GitHub Issues) behind the UNCHANGED gate. NO real network: a mock
 // fetch is injected; assertions prove the real API is reached ONLY via TicketGateway + capability + the full

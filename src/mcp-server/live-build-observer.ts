@@ -11,9 +11,9 @@
 import { spawn } from 'node:child_process';
 import { statSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   BuildObserver,
   ObservationAuditor,
@@ -21,7 +21,7 @@ import {
   type ArtifactProbe,
   type BuildOutcome,
   type ObserverConfig,
-} from '../features/build-observer/build-observer.js';
+} from '../layer-4-build-harden/build-observer/build-observer.js';
 
 /** Real artifact probe: size + SHA-256 of a file's bytes. Returns null for a missing/non-file path. */
 export const nodeArtifactProbe: ArtifactProbe = (path) => {

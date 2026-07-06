@@ -13,8 +13,8 @@
 
 import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import type { PendingItem, ConsoleDecisionOutcome } from '../features/decision-console/decision-console.js';
-import type { Principal } from '../features/approval-gate/approval-gate.js';
+import type { PendingItem, ConsoleDecisionOutcome } from '../layer-2-command/decision-console/decision-console.js';
+import type { Principal } from '../layer-1-law/approval-gate/approval-gate.js';
 import { EC_STYLE, EC_MONOGRAM } from './ec-design.js';
 
 /** The seat the UI drives. `DecisionConsole` satisfies it structurally. */

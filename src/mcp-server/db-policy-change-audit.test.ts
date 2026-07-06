@@ -2,8 +2,8 @@ import { describe, it, expect, afterAll } from 'vitest';
 import pkg from 'pg';
 const { Pool } = pkg;
 import { PostgresPolicyChangeAudit, type PolicyChangeAuditEvent } from './policy-change-wiring.js';
-import { PostgresHashChainSink } from '../features/audit-engine/postgres-sink.js';
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
+import { PostgresHashChainSink } from '../factory-shared/audit-engine/postgres-sink.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
 
 // Wave 6 Piece 3 — policy version transitions are durably audited in the real append-only, hash-chained store,
 // operator-attributed (never 'claude'). No mocks on the audit path.

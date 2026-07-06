@@ -3,17 +3,17 @@
 // the allowlist-redacted hash-chain auditor. Thin composition: NO guard logic, NO gate/bridge, NO mutation —
 // it reads graph facts and classifies. It does NOT modify Phase 1.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import { factoryCapabilityGraph } from './live-capability-reuse-graph.js';
 import {
   InternalReuseEngine,
   ReuseDecisionAuditor,
   REUSE_AUDIT_ALLOWLIST,
   type GraphReader,
-} from '../features/internal-reuse-engine/internal-reuse-engine.js';
+} from '../layer-3-harvest/internal-reuse-engine/internal-reuse-engine.js';
 
 /** The engine over an already-built graph (the Phase-1 CapabilityReuseGraph satisfies GraphReader structurally). */
 export function factoryInternalReuseEngine(graph: GraphReader): InternalReuseEngine {

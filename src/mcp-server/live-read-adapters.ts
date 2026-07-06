@@ -9,8 +9,8 @@
 // composition root decides what is live. Only the READ_ONLY tier is wired live this phase; write/external
 // stay on fakes (wired in server.ts).
 
-import type { FactoryReadPorts, FactoryReadParams } from '../features/mcp-bridge/factory-read-tools.js';
-import type { ToolRegistryReader } from '../features/tool-registry/tool-registry.js';
+import type { FactoryReadPorts, FactoryReadParams } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import type { ToolRegistryReader } from '../layer-5-action/tool-registry/tool-registry.js';
 
 /** Minimal read shapes over the live stores (structural — no concrete store import). */
 export interface ListReader<T> { list(): Promise<T[]>; }

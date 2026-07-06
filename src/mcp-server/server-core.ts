@@ -9,17 +9,17 @@
 // concrete bridge constants/classifier — but the bridge itself is consumed via a port (import type) so the
 // core is unit-testable with a fake bridge.
 
-import type { ToolRegistryReader, ToolDefinition } from '../features/tool-registry/tool-registry.js';
+import type { ToolRegistryReader, ToolDefinition } from '../layer-5-action/tool-registry/tool-registry.js';
 import type {
   BridgeCallContext, BridgeOutcome, FactoryReadOutcome, DraftOutcome, WriteOutcome, ExternalOutcome,
-} from '../features/mcp-bridge/mcp-bridge.js';
-import { EXPOSED_TOOLS, EXPOSED_EXTERNAL_TOOLS, FORBIDDEN_TOOL_SET } from '../features/mcp-bridge/mcp-bridge.js';
-import { classifyRegisteredTool } from '../features/mcp-bridge/factory-read-tools.js';
-import type { FactoryReadTool, FactoryReadParams } from '../features/mcp-bridge/factory-read-tools.js';
-import type { DraftTool, DraftParams } from '../features/mcp-bridge/draft-tools.js';
-import type { WriteTool, WriteParams } from '../features/mcp-bridge/write-tools.js';
-import type { ExternalTool, ExternalParams } from '../features/mcp-bridge/external-tools.js';
-import type { ToolClass } from '../features/mcp-bridge/tool-classes.js';
+} from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { EXPOSED_TOOLS, EXPOSED_EXTERNAL_TOOLS, FORBIDDEN_TOOL_SET } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { classifyRegisteredTool } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import type { FactoryReadTool, FactoryReadParams } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import type { DraftTool, DraftParams } from '../layer-5-action/mcp-bridge/draft-tools.js';
+import type { WriteTool, WriteParams } from '../layer-5-action/mcp-bridge/write-tools.js';
+import type { ExternalTool, ExternalParams } from '../layer-5-action/mcp-bridge/external-tools.js';
+import type { ToolClass } from '../layer-5-action/mcp-bridge/tool-classes.js';
 
 /** The slice of the bridge the server delegates to. `McpBridge` satisfies this structurally. */
 export interface McpServerBridge {

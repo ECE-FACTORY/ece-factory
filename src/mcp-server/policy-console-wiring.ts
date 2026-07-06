@@ -13,12 +13,12 @@
 // withhold. NO guard/gauntlet/gate/decision-console engine file is edited.
 
 import type { OperatorSeat } from './decision-console-server.js';
-import type { PendingItem, ConsoleDecisionOutcome } from '../features/decision-console/decision-console.js';
-import type { Principal } from '../features/approval-gate/approval-gate.js';
-import type { PolicyEvaluation, PolicyActionFacts } from '../features/policy-engine/policy-engine.js';
-import type { PolicyEvaluator } from '../features/policy-engine/policy-store.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, SessionInfo, Environment } from '../features/audit-engine/schema.js';
+import type { PendingItem, ConsoleDecisionOutcome } from '../layer-2-command/decision-console/decision-console.js';
+import type { Principal } from '../layer-1-law/approval-gate/approval-gate.js';
+import type { PolicyEvaluation, PolicyActionFacts } from '../layer-1-law/policy-engine/policy-engine.js';
+import type { PolicyEvaluator } from '../layer-1-law/policy-engine/policy-store.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, SessionInfo, Environment } from '../factory-shared/audit-engine/schema.js';
 
 /** A pending item enriched with its advisory policy read (for the Console display). */
 export type PolicyPendingItem = PendingItem & { policy: PolicyEvaluation };

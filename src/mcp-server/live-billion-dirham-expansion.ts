@@ -7,16 +7,16 @@
 // the graph, NO financial magnitude may be invented, and no secret/key may enter its prompts or the audit. Mirrors
 // the prior judgment adapters.
 
-import { RedactionEngine } from '../features/redaction-engine/redaction-engine.js';
-import { SecretPatternRedactor } from '../features/build-observer/build-observer.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, Environment } from '../features/audit-engine/schema.js';
+import { RedactionEngine } from '../factory-shared/redaction-engine/redaction-engine.js';
+import { SecretPatternRedactor } from '../layer-4-build-harden/build-observer/build-observer.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, Environment } from '../factory-shared/audit-engine/schema.js';
 import {
   BillionDirhamExpansionEngine,
   ExpansionAuditor,
   EXPANSION_AUDIT_ALLOWLIST,
   type GraphReader,
-} from '../features/billion-dirham-expansion/billion-dirham-expansion.js';
+} from '../layer-6-venture-intel/billion-dirham-expansion/billion-dirham-expansion.js';
 
 /** The advisory Billion-Dirham Expansion engine, grounded on an already-built graph (the Phase-1
  *  CapabilityReuseGraph satisfies GraphReader structurally). Uses the Observer's secret scrubber. */

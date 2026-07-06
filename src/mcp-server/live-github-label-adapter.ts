@@ -9,7 +9,7 @@
 // read ONLY from the constructor (the composition root passes process.env.ECE_GITHUB_TOKEN) — never hardcoded,
 // committed, logged, echoed, or placed in the returned record / error message.
 
-import type { ExternalTarget, ExternalResult } from '../features/mcp-bridge/external-tools.js';
+import type { ExternalTarget, ExternalResult } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 export interface GitHubLabelAdapterOptions {
   token: string;

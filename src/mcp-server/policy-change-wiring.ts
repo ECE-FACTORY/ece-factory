@@ -8,12 +8,12 @@
 // reference to audit/redaction/kill/approval-config/sole-authority/FORBIDDEN. The AI can never approve (the
 // gate + Console already bar 'claude'/the proposing caller; `apply` re-checks the approver defensively).
 
-import type { PolicyStore, PolicyTransition } from '../features/policy-engine/policy-store.js';
-import type { PolicyRule } from '../features/policy-engine/policy-engine.js';
-import type { ActionDescriptor } from '../features/approval-gate/approval-gate.js';
-import type { EnqueueMeta } from '../features/decision-console/decision-console.js';
-import type { AuditSink } from '../features/audit-engine/sink.js';
-import type { HumanActor, SessionInfo, Environment } from '../features/audit-engine/schema.js';
+import type { PolicyStore, PolicyTransition } from '../layer-1-law/policy-engine/policy-store.js';
+import type { PolicyRule } from '../layer-1-law/policy-engine/policy-engine.js';
+import type { ActionDescriptor } from '../layer-1-law/approval-gate/approval-gate.js';
+import type { EnqueueMeta } from '../layer-2-command/decision-console/decision-console.js';
+import type { AuditSink } from '../factory-shared/audit-engine/sink.js';
+import type { HumanActor, SessionInfo, Environment } from '../factory-shared/audit-engine/schema.js';
 
 export const POLICY_CHANGE_TOOL = 'apply_policy_version';
 

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { McpServerCore, type McpServerBridge } from './server-core.js';
-import { EXPOSED_TOOLS, type BridgeCallContext, type BridgeOutcome, type FactoryReadOutcome, type DraftOutcome, type WriteOutcome, type ExternalOutcome } from '../features/mcp-bridge/mcp-bridge.js';
-import { DRAFT_STATUS } from '../features/mcp-bridge/tool-classes.js';
-import { FORBIDDEN_TOOLS } from '../features/mcp-bridge/external-tools.js';
-import { createDefaultToolRegistry } from '../features/tool-registry/tool-registry.js';
-import { registerFactoryReadTools } from '../features/mcp-bridge/factory-read-tools.js';
-import { registerDraftTools } from '../features/mcp-bridge/draft-tools.js';
-import { registerWriteTools } from '../features/mcp-bridge/write-tools.js';
-import { registerExternalTools, registerForbiddenTools } from '../features/mcp-bridge/external-tools.js';
+import { EXPOSED_TOOLS, type BridgeCallContext, type BridgeOutcome, type FactoryReadOutcome, type DraftOutcome, type WriteOutcome, type ExternalOutcome } from '../layer-5-action/mcp-bridge/mcp-bridge.js';
+import { DRAFT_STATUS } from '../layer-5-action/mcp-bridge/tool-classes.js';
+import { FORBIDDEN_TOOLS } from '../layer-5-action/mcp-bridge/external-tools.js';
+import { createDefaultToolRegistry } from '../layer-5-action/tool-registry/tool-registry.js';
+import { registerFactoryReadTools } from '../layer-5-action/mcp-bridge/factory-read-tools.js';
+import { registerDraftTools } from '../layer-5-action/mcp-bridge/draft-tools.js';
+import { registerWriteTools } from '../layer-5-action/mcp-bridge/write-tools.js';
+import { registerExternalTools, registerForbiddenTools } from '../layer-5-action/mcp-bridge/external-tools.js';
 
 // MCP Server Core — pure-logic. Proves it exposes EXACTLY the classified surface and routes each call to
 // the correct bridge method BY CLASS, adding NO guard logic (a fake bridge records which method was hit).
