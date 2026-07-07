@@ -14,7 +14,16 @@ Run **one governed, read-only harvest pass** for a named domain and assemble a H
    - `classifyLicense` via the engine's `LicenseClassifier` port — `license-compliance.ts:92`
    - `candidateFromScoringInputs` + `scoreCandidate` — `scoring-engine.ts:51`, `:131`
    - `assessSovereignReadiness` — `sovereign-readiness.ts:77`
-4. **Decide** — `decideSourcing()` maps the REAL score band to `FORK` (≥70) / `EXTEND` (55–69) / `BUILD` (genuine absence) / **`NEEDS-ASSESSMENT`** (see honest finding).
+3b. **Enrich (optional, read-only)** — if a `SignalsScoutPort` is injected, `gatherSignals()` reads the four dimensions the base scout cannot source via **`repo-scout-signals`**, and `enrichScore()` re-grades the candidate **under the confidence contract** (below). No port injected, or signals fail closed for a candidate ⇒ that candidate is graded **exactly as before** (deny-by-default). The gather is per-candidate and tolerant: a throw ⇒ `null` ⇒ no enrichment (never crashes the chain, never fabricates).
+4. **Decide** — `decideSourcing()` maps the (possibly enriched) score band to `FORK` (≥70) / `EXTEND` (55–69) / `BUILD` (genuine absence) / **`NEEDS-ASSESSMENT`** (see honest finding). When enrichment moved the band, the decision evidence attributes it to the exact measured/bounded signals.
+
+## The confidence contract (the integrity mechanism — `enrichScore()` encodes it)
+Each dimension emits `{ value, confidence, evidence[] }`. The orchestrator gates its influence on the score:
+- **measured** → graded at **full weight** by the real scoring engine (**may raise** the band). Maintainability is measured whenever the signals scout succeeds; architecture is measured when a dependency manifest is readable.
+- **partial** → **weak / bounded**: a partial architecture is capped at `'possible'` (≤6/15, still flagged); **air-gap is bounded to ZERO uplift** — absence of a cloud dependency is not proof of air-gap safety, and any uplift would erode the sovereign air-gap gate.
+- **not-mechanizable** → **deny-by-default (0)**, byte-identical to an un-enriched grade (white-label is always here).
+
+Because air-gap + white-label never raise a band, the **top reachable enriched score is `20+18+11+10 = 59` → band `risky`**. Enrichment can sharpen `NEEDS-ASSESSMENT → EXTEND` on real measured evidence but **can never manufacture a `FORK`** — that still requires the human air-gap + white-label judgment. Every point of movement is recorded in `GradedCandidate.enrichment` (`EnrichmentTrace`: before/after totals + bands + per-dimension deltas) and surfaced in the report's per-candidate "Signals (confidence-gated)" column. A verdict change that cannot be traced to a specific measured/bounded signal does not happen.
 5. **Assemble** — sub-domain decomposition; spine + supporting repos; license evidence (≤1 line quoted from the real LICENSE file); sovereign/air-gap; custom-code boundary (reuse vs. ECE-builds = the moat); adversarial red-team; market position.
 6. **Reviewer re-derivation** — `reviewLicense()` / `reviewAirGap()` independently re-derive license + air-gap from the RAW scouted evidence (not the assembler's summary) and record agreement/disagreement.
 7. **Stop** — `status` is the single literal `'STOP-AWAITING-HUMAN-APPROVAL'`. The module returns a report string; writing to `docs/` and any approval are outside it (the human gate).
@@ -36,5 +45,6 @@ Imports only the real Layer-3 read/grader engines; nothing from the action layer
 Build + test only. Not connected to the live MCP server or any write path. Feeding an approved report forward is a separate, human-gated step.
 
 ## Open items
-- The scout does not yet source air-gap / white-label / architecture-fit / maintainability — those assessment engines (or a human pass) are required before a decision hardens past NEEDS-ASSESSMENT.
+- The base scout does not source air-gap / white-label / architecture-fit / maintainability; the optional `SignalsScoutPort` (`repo-scout-signals`) now supplies **measured** maintainability/architecture and a **partial** air-gap, but **air-gap + white-label remain machine-unassessable** — a human pass is still required before a decision hardens past NEEDS-ASSESSMENT (enrichment tops out at EXTEND).
+- The orchestrator maps a candidate to `SignalsQuery{owner,name}`; the injected adapter resolves the default branch (the orchestrator never handles a token or a branch). The base `ScoutedCandidate` does not carry a default branch, so the live adapter resolves it read-only.
 - Single-page, popularity-sorted discovery; hand-authored sub-domain queries.

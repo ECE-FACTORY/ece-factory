@@ -8,8 +8,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { RepoScoutSignals } from './repo-scout-signals.js';
+import { normalizeGithubToken } from '../../factory-shared/github-token/github-token.js';
 
-const TOKEN = process.env.GITHUB_TOKEN?.trim();
+// Route through the shared guard: a blank / whitespace-only / malformed GITHUB_TOKEN is treated as ABSENT,
+// so `GITHUB_TOKEN=` no longer triggers an unauthenticated live run — it SKIPS exactly like a missing token.
+const TOKEN = normalizeGithubToken(process.env.GITHUB_TOKEN);
 const HAS_TOKEN = !!TOKEN;
 
 // A well-known, permissively-licensed repo of the kind the Legal Ops harvest surfaces (a document/PDF lib).

@@ -22,6 +22,7 @@
 // READ-ONLY / STANDALONE: it holds no gate/approval/bridge/write reference and imports nothing from the
 // action layer. Cross-engine references are `import type` (plus the two pure license helpers, reused).
 
+import { normalizeGithubToken } from '../../factory-shared/github-token/github-token.js';
 import type { RepoIdentity, RepoEvaluationInput, MaturitySignals } from '../repo-intelligence/repo-intelligence.js';
 import type { LicenseInput } from '../license-compliance/license-compliance.js';
 import { detectFromText, labelFromBadge } from '../license-compliance/license-compliance.js';
@@ -175,8 +176,8 @@ export class RepoScout {
   private readonly now: () => number;
 
   constructor(opts: RepoScoutOptions = {}) {
-    const t = opts.token?.trim();
-    this.#token = t ? t : undefined;
+    // Single shared guard: missing / blank / whitespace-only / malformed ⇒ treated as NO TOKEN (fail-closed).
+    this.#token = normalizeGithubToken(opts.token);
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
     this.apiBase = (opts.apiBase ?? 'https://api.github.com').replace(/\/$/, '');
     this.rawBase = (opts.rawBase ?? 'https://raw.githubusercontent.com').replace(/\/$/, '');

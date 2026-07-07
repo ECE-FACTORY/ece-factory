@@ -27,6 +27,7 @@
 //
 // READ-ONLY / STANDALONE: imports only the grader RATING TYPES (import type); reaches no write/external path.
 
+import { normalizeGithubToken } from '../../factory-shared/github-token/github-token.js';
 import type { ArchFitRating, MaintainabilityRating } from '../scoring-engine/scoring-engine.js';
 import type { AirGapSuitability, WhiteLabelFit } from '../repo-intelligence/repo-intelligence.js';
 
@@ -227,8 +228,8 @@ export class RepoScoutSignals {
   private readonly now: () => number;
 
   constructor(opts: RepoScoutSignalsOptions = {}) {
-    const t = opts.token?.trim();
-    this.#token = t ? t : undefined;
+    // Single shared guard: missing / blank / whitespace-only / malformed ⇒ treated as NO TOKEN (fail-closed).
+    this.#token = normalizeGithubToken(opts.token);
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
     this.apiBase = (opts.apiBase ?? 'https://api.github.com').replace(/\/$/, '');
     this.rawBase = (opts.rawBase ?? 'https://raw.githubusercontent.com').replace(/\/$/, '');

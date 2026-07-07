@@ -11,7 +11,23 @@
 //        • classifyLicense (via the LicenseClassifier) — license-compliance.ts:92
 //        • scoreCandidate / candidateFromScoringInputs — scoring-engine.ts:131 / :51
 //        • assessSovereignReadiness                    — sovereign-readiness.ts:77
-//   4. DECIDE fork / extend / build / needs-assessment per sub-domain FROM THE REAL SCORES.
+//   3b. ENRICH (optional, read-only): if a SignalsScoutPort is injected, gather the four dimensions the base
+//       scout cannot source (maintainability / architecture / air-gap / white-label) via repo-scout-signals
+//       and RE-GRADE the candidate UNDER THE CONFIDENCE CONTRACT (below). Enrichment can only SHARPEN a band
+//       where real fetched evidence justifies it; if no port is injected, or signals fail closed for a
+//       candidate, that candidate is graded EXACTLY as before (deny-by-default, no fabrication, no crash).
+//   4. DECIDE fork / extend / build / needs-assessment per sub-domain FROM THE (possibly enriched) SCORES.
+//
+// THE CONFIDENCE CONTRACT (the integrity mechanism — enrichScore() encodes it):
+//   • measured        → the dimension is graded at FULL weight by the real scoring engine (MAY raise the band).
+//   • partial         → the dimension contributes WEAKLY / BOUNDED: architecture is capped at 'possible'
+//                       (6/15, still flagged); AIR-GAP is bounded to ZERO uplift — absence of a cloud dep is
+//                       not proof of air-gap safety, and any uplift would erode the sovereign air-gap gate.
+//   • not-mechanizable → the dimension stays DENY-BY-DEFAULT (0), byte-identical to an un-enriched grade.
+//   Because air-gap + white-label NEVER raise a band from signals, the TOP reachable enriched score is
+//   license(20)+maturity(18)+arch(11,'good')+maint(10,'clean') = 59 ⇒ band 'risky'. Enrichment can sharpen
+//   NEEDS-ASSESSMENT → EXTEND on real measured evidence, but can NEVER manufacture a FORK — that still needs
+//   the human air-gap + white-label judgment. Every point of movement is TRACED in GradedCandidate.enrichment.
 //   5. ASSEMBLE the Harvest Report (decomposition, spine + supporting, license evidence, sovereign/air-gap,
 //      custom-code boundary/moat, adversarial red-team, market position).
 //   6. REVIEWER RE-DERIVATION: independently re-derive license + air-gap from the scouted evidence (NOT the
@@ -27,12 +43,15 @@
 
 import type { ScoutQuery, ScoutResult, ScoutedCandidate } from '../repo-scout/repo-scout.js';
 import { RepoIntelligenceEngine, scoringInputs } from '../repo-intelligence/repo-intelligence.js';
-import type { RepoEvaluationRecord, RepoIdentity, LicenseClassifier, LicenseDecision } from '../repo-intelligence/repo-intelligence.js';
+import type { RepoEvaluationRecord, RepoIdentity, LicenseClassifier, LicenseDecision, ScoringInputs } from '../repo-intelligence/repo-intelligence.js';
 import { classifyLicense, detectFromText } from '../license-compliance/license-compliance.js';
 import { scoreCandidate, candidateFromScoringInputs } from '../scoring-engine/scoring-engine.js';
-import type { ScoreResult } from '../scoring-engine/scoring-engine.js';
+import type { ScoreResult, ScoreBand, ArchFitRating } from '../scoring-engine/scoring-engine.js';
 import { assessSovereignReadiness } from '../sovereign-readiness/sovereign-readiness.js';
 import type { SovereignDescriptor, SovereignReport } from '../sovereign-readiness/sovereign-readiness.js';
+// TYPE-ONLY: the signals scout's output shapes. All of its network egress lives in repo-scout-signals; this
+// module never news it up — it consumes an injected SignalsScoutPort (exactly as it consumes the ScoutPort).
+import type { RepoSignals, Confidence } from '../repo-scout-signals/repo-scout-signals.js';
 
 // ── Public shapes ────────────────────────────────────────────────────────────────────────────────────
 
@@ -41,7 +60,42 @@ export interface SubDomain { key: string; title: string; query: string }
 /** The injected scout PORT — exactly the committed repo-scout's surface (network lives there, not here). */
 export interface ScoutPort { scout(q: ScoutQuery): Promise<ScoutResult> }
 
-export interface OrchestratorOptions { now?: () => number; maxPerSubDomain?: number }
+/** Minimal repo identity the signals scout needs. The branch is resolved by the adapter (the orchestrator
+ *  never sees a token or a branch — it only knows owner/name, exactly as the base graders do). */
+export interface SignalsQuery { owner: string; name: string }
+/** The injected signals PORT — the read-only repo-scout-signals surface. All of ITS network egress lives in
+ *  repo-scout-signals; the orchestrator only assembles its confidence-tagged output. OPTIONAL: absent ⇒ no
+ *  enrichment ⇒ every candidate is graded deny-by-default exactly as before. */
+export interface SignalsScoutPort { gather(q: SignalsQuery): Promise<RepoSignals> }
+
+export interface OrchestratorOptions { now?: () => number; maxPerSubDomain?: number; signalsPort?: SignalsScoutPort }
+
+// ── Enrichment trace (the audit trail for every confidence-gated verdict movement) ─────────────────────
+
+/** How one dimension's scout-signal influenced the score, under the confidence contract — fully traceable. */
+export interface DimensionEnrichment {
+  dimension: 'maintainability' | 'architecture' | 'air-gap' | 'white-label';
+  confidence: Confidence;
+  value: string;
+  /** 'raised' — measured evidence lifted the sub-score at full weight; 'bounded' — a partial signal lifted it
+   *  weakly within a cap; 'none' — deny-by-default preserved (not-mechanizable, or no positive evidence). */
+  influence: 'raised' | 'bounded' | 'none';
+  pointsBefore: number; // the un-enriched (deny-by-default) sub-score
+  pointsAfter: number;  // the sub-score after the confidence-gated enrichment
+  evidence: string[];   // the signal's own evidence — the ONLY basis on which a verdict may move
+}
+
+/** The complete before/after audit for one candidate's enrichment. `applied:false` ⇒ graded as before. */
+export interface EnrichmentTrace {
+  applied: boolean;
+  status: 'OK' | 'FAILED_CLOSED' | 'NONE';
+  reason?: string;            // set when signals failed closed for this candidate (honest, no fabrication)
+  totalBefore: number;
+  totalAfter: number;
+  bandBefore: ScoreBand;
+  bandAfter: ScoreBand;
+  dimensions: DimensionEnrichment[];
+}
 
 export type SourcingDecision = 'FORK' | 'EXTEND' | 'BUILD' | 'NEEDS-ASSESSMENT';
 
@@ -56,6 +110,9 @@ export interface GradedCandidate {
   licenseDisagreement: boolean;   // API hint vs raw text (raw won)
   rawLicenseText: string | null;  // kept for the independent reviewer pass; NOT rendered in full
   notes: string[];
+  /** The confidence-gated enrichment audit. Present whenever grade() ran; `applied:false` when no signals
+   *  were available (no port / fail-closed) ⇒ `score` equals the un-enriched deny-by-default grade. */
+  enrichment: EnrichmentTrace;
 }
 
 export interface SubDomainResult {
@@ -137,12 +194,128 @@ export function reviewAirGap(claimed: string, hasDeploymentEvidence: boolean): {
   return { reviewer, agrees: claimed === reviewer };
 }
 
-// ── Stage 4 (pure): decision from the real score ───────────────────────────────────────────────────────
+// ── Stage 3b (pure): confidence-gated enrichment — the CONFIDENCE CONTRACT, encoded ────────────────────
 
-/** Do the four dimensions the scout cannot source dominate the shortfall? (air-gap/white-label/arch/maint) */
-function shortfallIsUnassessed(score: ScoreResult): boolean {
-  const unassessed = score.subScores.filter((s) => ['air-gap', 'white-label', 'arch-fit', 'maintainability'].includes(s.dimension));
-  return unassessed.every((s) => s.flagged); // all deny-by-default ⇒ the low score is "not looked at yet", not "bad"
+const FOUR_DIMS = ['air-gap', 'white-label', 'arch-fit', 'maintainability'];
+
+/** Bound a PARTIAL architecture rating to a WEAK contribution: never better than 'possible' (6/15, flagged).
+ *  A partial (tree-only) architecture signal must not earn the full 'good' (11) that a manifest-MEASURED one
+ *  would — that is the whole point of "partial contributes weakly, within bounds". 'poor' stays 'poor'. */
+function boundPartialArch(rating: ArchFitRating): ArchFitRating {
+  return rating === 'poor' ? 'poor' : 'possible';
+}
+
+function enrichNote(kind: string, evidence: string[]): string {
+  return `${kind}: ${evidence.join('; ')}`.slice(0, 240);
+}
+
+/**
+ * Re-grade ONE candidate under the CONFIDENCE CONTRACT, using the signals scout's confidence-tagged evidence.
+ * Returns the (possibly sharpened) score AND a full before/after trace. See the file header for the contract.
+ *
+ * KEY INVARIANTS:
+ *   • signals absent / FAILED_CLOSED ⇒ returns the un-enriched `baseScore` verbatim (applied:false). No crash,
+ *     no fabrication — the candidate is graded exactly as before.
+ *   • air-gap + white-label are NEVER overridden ⇒ they stay at the record's deny-by-default 'unknown' (0).
+ *   • only MEASURED (full) or PARTIAL-architecture (bounded to 'possible') can move a sub-score upward.
+ */
+export function enrichScore(
+  inputs: ScoringInputs,
+  baseScore: ScoreResult,
+  signals: RepoSignals | null,
+): { score: ScoreResult; enrichment: EnrichmentTrace } {
+  if (!signals || signals.status !== 'OK') {
+    return {
+      score: baseScore,
+      enrichment: {
+        applied: false,
+        status: signals ? 'FAILED_CLOSED' : 'NONE',
+        reason: signals?.reason,
+        totalBefore: baseScore.total, totalAfter: baseScore.total,
+        bandBefore: baseScore.band, bandAfter: baseScore.band,
+        dimensions: [],
+      },
+    };
+  }
+
+  const extra: {
+    archFit?: { rating: ArchFitRating; note?: string };
+    maintainability?: { rating: 'clean' | 'maintainable' | 'hard' | 'unsafe'; note?: string };
+  } = {};
+
+  // MAINTAINABILITY — 'measured' MAY raise at full weight; anything else stays deny-by-default.
+  if (signals.maintainability.confidence === 'measured' && signals.maintainability.value !== 'unknown') {
+    extra.maintainability = { rating: signals.maintainability.value, note: enrichNote('measured', signals.maintainability.evidence) };
+  }
+  // ARCHITECTURE — 'measured' at full weight; 'partial' bounded to ≤ 'possible'; else deny-by-default.
+  if (signals.architecture.value !== 'unknown') {
+    if (signals.architecture.confidence === 'measured') {
+      extra.archFit = { rating: signals.architecture.value, note: enrichNote('measured', signals.architecture.evidence) };
+    } else if (signals.architecture.confidence === 'partial') {
+      extra.archFit = { rating: boundPartialArch(signals.architecture.value), note: enrichNote('partial→bounded', signals.architecture.evidence) };
+    }
+  }
+  // AIR-GAP + WHITE-LABEL — deliberately NOT passed: they remain the record's deny-by-default 'unknown' (0).
+  // A found cloud blocker (air-gap 'no') is surfaced as evidence in the trace but never lifts the score.
+
+  const score = scoreCandidate(candidateFromScoringInputs(inputs, extra));
+  return {
+    score,
+    enrichment: {
+      applied: true,
+      status: 'OK',
+      totalBefore: baseScore.total, totalAfter: score.total,
+      bandBefore: baseScore.band, bandAfter: score.band,
+      dimensions: buildDimensionTrace(baseScore, score, signals),
+    },
+  };
+}
+
+function subScoreByDim(s: ScoreResult): Record<string, number> {
+  return Object.fromEntries(s.subScores.map((x) => [x.dimension, x.score]));
+}
+
+/** Build the per-dimension before/after audit rows — the ONLY basis on which a verdict may be said to move. */
+function buildDimensionTrace(base: ScoreResult, enriched: ScoreResult, signals: RepoSignals): DimensionEnrichment[] {
+  const b = subScoreByDim(base), e = subScoreByDim(enriched);
+  const row = (dimension: DimensionEnrichment['dimension'], key: string, sig: { value: unknown; confidence: Confidence; evidence: string[] }): DimensionEnrichment => {
+    const before = b[key] ?? 0, after = e[key] ?? 0;
+    const influence: DimensionEnrichment['influence'] = after > before ? (sig.confidence === 'measured' ? 'raised' : 'bounded') : 'none';
+    return { dimension, confidence: sig.confidence, value: String(sig.value), influence, pointsBefore: before, pointsAfter: after, evidence: sig.evidence };
+  };
+  return [
+    row('maintainability', 'maintainability', signals.maintainability),
+    row('architecture', 'arch-fit', signals.architecture),
+    row('air-gap', 'air-gap', signals.airGap),
+    row('white-label', 'white-label', signals.whiteLabel),
+  ];
+}
+
+/** Sub-score dimensions the signals actually ASSESSED (measured maint, or measured/partial architecture).
+ *  air-gap + white-label are NEVER "assessed" by machine — a human must still judge them, so they always
+ *  remain unassessed headroom (see shortfallIsUnassessed). */
+function assessedDims(enrichment: EnrichmentTrace | undefined): Set<string> {
+  const out = new Set<string>();
+  if (!enrichment?.applied) return out;
+  for (const d of enrichment.dimensions) {
+    if (d.dimension === 'maintainability' && d.confidence === 'measured' && d.value !== 'unknown') out.add('maintainability');
+    if (d.dimension === 'architecture' && (d.confidence === 'measured' || d.confidence === 'partial') && d.value !== 'unknown') out.add('arch-fit');
+  }
+  return out;
+}
+
+// ── Stage 4 (pure): decision from the real (possibly enriched) score ───────────────────────────────────
+
+/** Is the sub-55 band still driven by dimensions NOBODY has assessed yet — rather than a proven weakness?
+ *  A candidate is "merely unassessed" if the points still available on genuinely-unassessed dimensions
+ *  (air-gap + white-label always; arch/maint only when no signal measured them) could still carry the total
+ *  to 'risky' (≥55). A MEASURED-low dimension is ASSESSED (a real finding) and does NOT count as headroom. */
+function shortfallIsUnassessed(spine: GradedCandidate): boolean {
+  const assessed = assessedDims(spine.enrichment);
+  const headroom = spine.score.subScores
+    .filter((s) => FOUR_DIMS.includes(s.dimension) && s.flagged && !assessed.has(s.dimension))
+    .reduce((h, s) => h + (s.max - s.score), 0);
+  return spine.score.total + headroom >= 55; // still reachable to risky by assessing what's unassessed
 }
 
 export function decideSourcing(candidates: GradedCandidate[]): { decision: SourcingDecision; evidence: string[] } {
@@ -158,6 +331,13 @@ export function decideSourcing(candidates: GradedCandidate[]): { decision: Sourc
   }
   const spine = pickSpine(eligible);
   evidence.push(`spine: ${spine.identity.owner}/${spine.identity.name} — real score ${spine.score.total}/100, band "${spine.score.band}"`);
+  // TRACEABILITY: if enrichment moved the band, record EXACTLY which measured/bounded signals justified it —
+  // a verdict that changed must be attributable to specific fetched evidence (the confidence contract).
+  if (spine.enrichment?.applied && spine.enrichment.bandAfter !== spine.enrichment.bandBefore) {
+    const moved = spine.enrichment.dimensions.filter((d) => d.influence !== 'none')
+      .map((d) => `${d.dimension}=${d.value} (${d.confidence}, +${d.pointsAfter - d.pointsBefore})`).join(', ');
+    evidence.push(`enrichment sharpened band ${spine.enrichment.bandBefore}→${spine.enrichment.bandAfter} (total ${spine.enrichment.totalBefore}→${spine.enrichment.totalAfter}) — justified ONLY by: ${moved || 'no positive signal'}`);
+  }
   if (spine.score.band === 'strong' || spine.score.band === 'acceptable') {
     return { decision: 'FORK', evidence: [...evidence, 'score ≥ 70 (acceptable/strong) — fork and white-label'] };
   }
@@ -165,7 +345,7 @@ export function decideSourcing(candidates: GradedCandidate[]): { decision: Sourc
     return { decision: 'EXTEND', evidence: [...evidence, 'score 55–69 (risky) — fork then build the gap'] };
   }
   // band 'reject' (< 55): distinguish a genuinely weak repo from one merely UN-ASSESSED on 4 dimensions.
-  if (spine.record.licenseDecision !== 'REJECT' && shortfallIsUnassessed(spine.score)) {
+  if (spine.record.licenseDecision !== 'REJECT' && shortfallIsUnassessed(spine)) {
     return {
       decision: 'NEEDS-ASSESSMENT',
       evidence: [...evidence,
@@ -189,10 +369,12 @@ export class HarvestOrchestrator {
   private readonly now: () => number;
   private readonly maxPer: number;
   private readonly repoIntel: RepoIntelligenceEngine;
+  private readonly signalsPort?: SignalsScoutPort;
 
   constructor(private readonly scoutPort: ScoutPort, opts: OrchestratorOptions = {}) {
     this.now = opts.now ?? (() => Date.now());
     this.maxPer = opts.maxPerSubDomain ?? DEFAULT_MAX;
+    this.signalsPort = opts.signalsPort; // OPTIONAL: absent ⇒ no enrichment ⇒ deny-by-default exactly as before
     // The License Engine is consumed via the injected classifier PORT the engine already defines — not reimplemented.
     const licenseClassifier: LicenseClassifier = { classify: (input) => classifyLicense(input) };
     this.repoIntel = new RepoIntelligenceEngine(licenseClassifier, this.now);
@@ -211,7 +393,9 @@ export class HarvestOrchestrator {
         // Fail-closed: NO report is produced from a broken source (no fabrication).
         return { status: 'FAILED_CLOSED', report: null, reportMarkdown: null, reason: `scout failed closed for "${sd.title}": ${scouted.reason ?? 'unknown'}` };
       }
-      const graded = scouted.candidates.map((c) => this.grade(c));
+      // Grade each candidate; enrich with the signals scout when a port is injected (per-candidate, tolerant).
+      const graded: GradedCandidate[] = [];
+      for (const c of scouted.candidates) graded.push(this.grade(c, await this.gatherSignals(c)));
       const { decision, evidence } = decideSourcing(graded);
       results.push({ subDomain: sd, candidates: graded, spine: graded.length ? pickSpineOrNull(graded) : null, decision, decisionEvidence: evidence });
     }
@@ -220,11 +404,24 @@ export class HarvestOrchestrator {
     return { status: 'OK', report, reportMarkdown: this.renderMarkdown(report) };
   }
 
-  /** Stage 3: run ONE candidate through the real graders. */
-  private grade(c: ScoutedCandidate): GradedCandidate {
+  /** Read-only, tolerant signals gather for ONE candidate. Signals are ENRICHMENT, never the source of truth:
+   *  no port ⇒ null; a throw ⇒ null (graded deny-by-default as before). Never crashes the chain, never fabricates. */
+  private async gatherSignals(c: ScoutedCandidate): Promise<RepoSignals | null> {
+    if (!this.signalsPort) return null;
+    try {
+      return await this.signalsPort.gather({ owner: c.evaluationInput.identity.owner, name: c.evaluationInput.identity.name });
+    } catch {
+      return null;
+    }
+  }
+
+  /** Stage 3 (+ 3b): run ONE candidate through the real graders, then re-grade under the confidence contract
+   *  when signals are available. Without signals, `score` is the un-enriched deny-by-default grade (unchanged). */
+  private grade(c: ScoutedCandidate, signals: RepoSignals | null): GradedCandidate {
     const record = this.repoIntel.evaluate(c.evaluationInput);                 // repo-intelligence.ts:109
-    const scoringCandidate = candidateFromScoringInputs(scoringInputs(record)); // scoring-engine.ts:51 (+ :90)
-    const score = scoreCandidate(scoringCandidate);                            // scoring-engine.ts:131
+    const inputs = scoringInputs(record);                                      // scoring-engine.ts:90
+    const baseScore = scoreCandidate(candidateFromScoringInputs(inputs));      // scoring-engine.ts:51 / :131 (deny-by-default)
+    const { score, enrichment } = enrichScore(inputs, baseScore, signals);     // Stage 3b — confidence contract
     return {
       repoUrl: c.repoUrl,
       identity: record.identity,
@@ -235,6 +432,7 @@ export class HarvestOrchestrator {
       licenseDisagreement: c.licenseDisagreement,
       rawLicenseText: c.evaluationInput.license.text ?? null,
       notes: c.notes,
+      enrichment,
     };
   }
 
@@ -274,6 +472,8 @@ export class HarvestOrchestrator {
         'Sub-domain queries are hand-authored; a poorly chosen query yields weak candidates that are not representative of the field.',
         'License detection is signature-based over the raw file; an unusual or dual-license file lands as NEEDS_REVIEW rather than a confident decision (correctly conservative, but it defers work to a human).',
         'The sovereign verdict is deny-by-default over an empty descriptor — it says nothing positive about any repo; it only proves nothing was verified.',
+        'Signal enrichment is CONFIDENCE-GATED: only MEASURED maintainability/architecture may raise a band at full weight; a PARTIAL architecture is bounded to "possible" (≤6/15); air-gap + white-label NEVER lift a band. An unreadable manifest/tree or a wrong default branch degrades a candidate to deny-by-default — it can only lose enrichment points, never gain fabricated ones.',
+        'Because air-gap + white-label stay deny-by-default, enrichment can sharpen a candidate to EXTEND ("risky", ≥55) at most — it can NEVER produce a FORK. Reading a FORK from signals alone would be impossible by construction; a FORK still requires human air-gap + white-label assessment.',
       ],
       moat: [
         'REUSE (harvest): permissively-licensed spines per sub-domain (CLM, e-sign, clause libraries, document assembly, obligation tracking) — do not rebuild what a proven repo does.',
@@ -285,7 +485,8 @@ export class HarvestOrchestrator {
         'The sovereign/air-gap + Arabic-first white-label composition is the differentiator nothing local offers off-the-shelf.',
       ],
       limitations: [
-        'End-to-end scores reflect ONLY license + maturity evidence. Fork/Extend/Build decisions are provisional until air-gap, white-label, architecture-fit and maintainability are assessed.',
+        'End-to-end scores reflect license + maturity, plus (where a signals scout ran) MEASURED maintainability/architecture. Air-gap + white-label remain deny-by-default (0) — machine-unassessable — so every decision is provisional until a human assesses them; enrichment can lift a candidate to EXTEND at most, never FORK.',
+        'Where signals were gathered, each candidate row shows the confidence-gated per-dimension deltas; a band that moved is attributed in the decision evidence to the exact measured/bounded signals that justified it. A candidate with no signals (or fail-closed) is graded exactly as a license+maturity-only pass.',
         'This is a READ-ONLY report. No repo was forked, created, or modified; no external action was taken.',
       ],
       status: 'STOP-AWAITING-HUMAN-APPROVAL',
@@ -310,10 +511,10 @@ export class HarvestOrchestrator {
       L.push(`### ${r.subDomain.title}  —  decision: **${r.decision}**`, '');
       L.push(`_Query:_ \`${r.subDomain.query}\``, '');
       for (const e of r.decisionEvidence) L.push(`- ${e}`);
-      L.push('', '| Repo | License (from real file) | Decision | Eligibility | Score | Band |', '|---|---|---|---|---|---|');
+      L.push('', '| Repo | License (from real file) | Decision | Eligibility | Score | Band | Signals (confidence-gated) |', '|---|---|---|---|---|---|---|');
       for (const c of r.candidates) {
         const dis = c.licenseDisagreement ? ' ⚠︎hint≠file' : '';
-        L.push(`| [${c.identity.owner}/${c.identity.name}](${c.repoUrl}) | ${c.record.licenseDetected}${dis} · "${c.licenseOneLine}" | ${c.record.licenseDecision} | ${c.record.eligibility} | ${c.score.total}/100 | ${c.score.band} |`);
+        L.push(`| [${c.identity.owner}/${c.identity.name}](${c.repoUrl}) | ${c.record.licenseDetected}${dis} · "${c.licenseOneLine}" | ${c.record.licenseDecision} | ${c.record.eligibility} | ${c.score.total}/100 | ${c.score.band} | ${enrichmentCell(c.enrichment)} |`);
       }
       L.push('');
     }
@@ -349,6 +550,18 @@ export class HarvestOrchestrator {
 function pickSpineOrNull(graded: GradedCandidate[]): GradedCandidate | null {
   const eligible = graded.filter((c) => c.record.eligibility === 'eligible');
   return eligible.length ? pickSpine(eligible) : null;
+}
+
+const CONF_ABBR: Record<Confidence, string> = { measured: 'meas', partial: 'part', 'not-mechanizable': 'n/m' };
+
+/** Compact, traceable per-candidate enrichment summary for the report table. Shows each dimension's value,
+ *  confidence, and the signed point delta the confidence contract allowed — so every movement is auditable. */
+function enrichmentCell(e: EnrichmentTrace): string {
+  if (!e.applied) return e.status === 'FAILED_CLOSED' ? '_fail-closed → deny-by-default_' : '_not gathered_';
+  return e.dimensions.map((d) => {
+    const delta = d.pointsAfter - d.pointsBefore;
+    return `${d.dimension}=${d.value}(${CONF_ABBR[d.confidence]},${delta >= 0 ? '+' : ''}${delta})`;
+  }).join(' · ');
 }
 
 /** ≤1 short line quoted from the real LICENSE file (first non-empty line), or an honest unverified marker. */
