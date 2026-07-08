@@ -67,11 +67,19 @@ async function withGenuineApproval<T>(
   return { status: outcome.status, value };
 }
 
-function planFor(basePath: string, entries: readonly PlannedFilesystemEntry[], boundToApprovalId: string): PlannedFilesystemWrite {
+// A plan bound to an approval on BOTH axes: `boundToApprovalId` (the approval id) AND `boundIntentHash` (the
+// content fingerprint the genuine token carries from mint). A plan that legitimately matches the presented token
+// passes `approval.boundIntentHash`; the transferable-approval / mismatch tests deliberately supply a WRONG value.
+function planFor(
+  basePath: string,
+  entries: readonly PlannedFilesystemEntry[],
+  boundToApprovalId: string,
+  boundIntentHash = 'testfingerprint',
+): PlannedFilesystemWrite {
   return {
     dryRun: true, plannedOnly: true, api: 'filesystem',
     basePath, entries,
-    boundIntentHash: 'testfingerprint', boundToApprovalId,
+    boundIntentHash, boundToApprovalId,
     note: 'test plan',
   };
 }
@@ -103,7 +111,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     const base = uniqueJailBase('happy');
     const { ctx } = recordingCtx();
     const { status, value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, FILES, approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, FILES, approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(status).toBe('executed'); // genuine dispatcher path ran
     expect(value?.ok).toBe(true);
@@ -118,8 +126,9 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     const base = uniqueJailBase('mismatch');
     const { ctx, refusals } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      // plan is bound to a DIFFERENT approval id than the genuine token presented
-      executeFilesystemPlan(planFor(base, FILES, approval.approvalId + '-WRONG'), approval, ctx));
+      // plan is bound to a DIFFERENT approval id than the genuine token presented (intent hash is honest, so the
+      // refusal is specifically the id axis of the binding)
+      executeFilesystemPlan(planFor(base, FILES, approval.approvalId + '-WRONG', approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     if (value?.ok) throw new Error('unreachable');
@@ -128,12 +137,35 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     expect(refusals[0]).toMatchObject({ stage: 'approval-binding', decision: 'REFUSE' });
   });
 
+  it('a GENUINE approval bound to a DIFFERENT plan (colliding id, different intent hash) ⇒ REFUSED, nothing written', async () => {
+    // TRANSFERABLE-APPROVAL DEFENSE. The approval below is genuine and gate-minted, bound to intent A
+    // ({ base }). We staple it to a plan for a DIFFERENT action whose boundToApprovalId is FORCED to equal this
+    // token's id — reproducing the real hazard: `approvalId` is a per-gate counter (apr_1 from any gate), so an
+    // approval for one action can share the id another plan recorded. The id check ALONE would accept it. The
+    // boundIntentHash check is what refuses: the plan's fingerprint is a DIFFERENT intent than the token carries.
+    const base = uniqueJailBase('xfer');
+    const { ctx, refusals } = recordingCtx();
+    const { value } = await withGenuineApproval(base, { base }, (approval) => {
+      // id matches the genuine token (the collision the old check could not catch)…
+      // …but the plan is bound to a DIFFERENT intent than the token was minted for.
+      expect(approval.boundIntentHash).not.toBe('a-different-plan-fingerprint');
+      const foreignPlan = planFor(base, FILES, approval.approvalId, 'a-different-plan-fingerprint');
+      return executeFilesystemPlan(foreignPlan, approval, ctx);
+    });
+
+    expect(value?.ok).toBe(false);
+    if (value?.ok) throw new Error('unreachable');
+    expect(value?.status).toBe('refused');                 // non-transferable: the token cannot execute plan B
+    expect(existsSync(base)).toBe(false);                  // NOTHING written
+    expect(refusals[0]).toMatchObject({ stage: 'approval-binding', decision: 'REFUSE' });
+  });
+
   it('absolute entry path ⇒ REFUSED, nothing written', async () => {
     const base = uniqueJailBase('abs');
     const evil = trackForCleanup('/tmp/ece-outside-abs-' + process.pid);
     const { ctx } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, [{ path: `${evil}/pwn.txt`, kind: 'file', contents: 'x' }], approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, [{ path: `${evil}/pwn.txt`, kind: 'file', contents: 'x' }], approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     expect(existsSync(base)).toBe(false);
@@ -144,7 +176,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     const base = uniqueJailBase('dotdot');
     const { ctx, refusals } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, [{ path: '../escape.txt', kind: 'file', contents: 'x' }], approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, [{ path: '../escape.txt', kind: 'file', contents: 'x' }], approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     expect(existsSync(base)).toBe(false);
@@ -163,7 +195,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     const base = join(container, 'esc', 'fresh'); // 'fresh' does not exist yet ⇒ refuse-on-exist does not preempt
     const { ctx, refusals } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, [{ path: 'landed.txt', kind: 'file', contents: 'x' }], approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, [{ path: 'landed.txt', kind: 'file', contents: 'x' }], approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     expect(refusals[0]).toMatchObject({ stage: 'jail-validation' });
@@ -199,7 +231,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     };
     const ctx: ExecuteContext = { audit, human: { user_id: 'alice' }, organizationId: 'org_1', environment: 'local' };
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, [{ path: 'README.md', kind: 'file', contents: 'PWNED' }], approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, [{ path: 'README.md', kind: 'file', contents: 'PWNED' }], approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(planted).toBe(true);                    // the race window actually fired (symlink planted post-validation)
     expect(value?.ok).toBe(false);
@@ -216,7 +248,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     const base = trackForCleanup('/tmp/not-a-jail-' + process.pid);
     const { ctx } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, [{ path: 'a.txt', kind: 'file', contents: 'x' }], approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, [{ path: 'a.txt', kind: 'file', contents: 'x' }], approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     expect(existsSync(base)).toBe(false);
@@ -231,7 +263,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     ];
     const { ctx } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, entries, approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, entries, approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     // The base dir was never even created — nothing partial.
@@ -246,7 +278,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     writeFileSync(join(base, 'README.md'), 'ORIGINAL\n'); // pre-existing content
     const { ctx, refusals } = recordingCtx();
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, FILES, approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, FILES, approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(false);
     expect(refusals[0]).toMatchObject({ stage: 'refuse-on-exist' });
@@ -259,7 +291,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     const emptyBase = uniqueJailBase('fresh-empty');
     mkdirSync(emptyBase, { recursive: true });
     const okRun = await withGenuineApproval(emptyBase, { base: emptyBase }, (approval) =>
-      executeFilesystemPlan(planFor(emptyBase, FILES, approval.approvalId), approval,
+      executeFilesystemPlan(planFor(emptyBase, FILES, approval.approvalId, approval.boundIntentHash), approval,
         recordingCtx({ createFreshInEmptySandbox: true }).ctx));
     expect(okRun.value?.ok).toBe(true);
     expect(existsSync(join(emptyBase, 'README.md'))).toBe(true);
@@ -269,7 +301,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     mkdirSync(dirtyBase, { recursive: true });
     writeFileSync(join(dirtyBase, 'preexisting.txt'), 'x');
     const badRun = await withGenuineApproval(dirtyBase, { base: dirtyBase }, (approval) =>
-      executeFilesystemPlan(planFor(dirtyBase, FILES, approval.approvalId), approval,
+      executeFilesystemPlan(planFor(dirtyBase, FILES, approval.approvalId, approval.boundIntentHash), approval,
         recordingCtx({ createFreshInEmptySandbox: true }).ctx));
     expect(badRun.value?.ok).toBe(false);
     expect(existsSync(join(dirtyBase, 'README.md'))).toBe(false); // nothing new written
@@ -286,7 +318,7 @@ describe('FilesystemExecutor — REAL disk writes, only inside the jail, only fr
     };
     const ctx: ExecuteContext = { audit, human: { user_id: 'alice' }, organizationId: 'org_1', environment: 'local' };
     const { value } = await withGenuineApproval(base, { base }, (approval) =>
-      executeFilesystemPlan(planFor(base, FILES, approval.approvalId), approval, ctx));
+      executeFilesystemPlan(planFor(base, FILES, approval.approvalId, approval.boundIntentHash), approval, ctx));
 
     expect(value?.ok).toBe(true);
     expect(order).toEqual(['intent', 'result']);       // audit-before-write, then outcome

@@ -329,6 +329,62 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     }
   });
 
+  // ── Prohibition 4h (added additively) — the Layer-4 BUILD CHAIN ORCHESTRATOR composes, but holds no power ─
+  // build-chain-orchestrator.ts is the FIRST end-to-end composition of the three proven pieces (build-planner,
+  // filesystem-adapter-dryrun, filesystem-executor). Composing them must NOT hand the composer any capability the
+  // pieces deny it. As a Layer-4 orchestrator it must obey the write boundary from the top: it imports NO node:fs
+  // (only the executor it delegates to touches disk), holds NO real fs-write call of its own, MINTS NOTHING, and
+  // CANNOT SELF-CONFIRM — its Phase-B `execute` requires BOTH a genuine ConsumedApproval AND an explicit human
+  // confirm, and the SOLE executor call site sits AFTER the confirm gate (so the free Phase-A `planOnly` can never
+  // reach a write). This block is purely ADDITIVE: it adds coverage for the orchestrator and changes NONE of the
+  // assertions above — 4e/4f/4g are untouched; the executor remains the sole sanctioned writer.
+  it('Prohibition 4h — the Layer-4 build-chain orchestrator imports no node:fs, has no real-write call, mints nothing, cannot self-confirm, and gates the sole executor call behind an explicit human confirm', () => {
+    const orchRaw = readFileSync(
+      join(SRC, 'layer-4-build-harden', 'build-chain-orchestrator', 'build-chain-orchestrator.ts'), 'utf8');
+    const orch = stripComments(orchRaw);
+
+    // 1. Imports NO node:fs at all — the orchestrator returns/relays DATA and cannot touch the filesystem itself.
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(orch)).toBe(false);
+    expect(/from\s*['"]fs(\/promises)?['"]/.test(orch)).toBe(false);
+    expect(/require\(\s*['"](node:)?fs(\/promises)?['"]\s*\)/.test(orch)).toBe(false);
+
+    // 2. NO real filesystem-write call of its own — it only DELEGATES to the executor (same technique as 4e/4f).
+    for (const re of [/\bwriteFile\s*\(/, /\bwriteFileSync\s*\(/, /\bmkdir\s*\(/, /\bmkdirSync\s*\(/, /\brm\s*\(/,
+                      /\brmdir\s*\(/, /\bopenSync\s*\(/, /\bappendFile\s*\(/, /\bcreateWriteStream\s*\(/, /\bcopyFile\s*\(/]) {
+      expect({ pattern: String(re), hit: re.test(orch) }).toEqual({ pattern: String(re), hit: false });
+    }
+
+    // 3. MINTS NOTHING — no token/capability mint of any kind, and it never CONSTRUCTS a passing confirm (it only
+    //    compares against EXECUTE_CONFIRM_TOKEN; it never assigns it into a `token:` field to fabricate one).
+    expect(/\bmintConsumedApproval\b/.test(orch)).toBe(false);
+    expect(/\bmintExternalCapability\b/.test(orch)).toBe(false);
+    expect(/\bmint[A-Za-z]*\s*\(/.test(orch)).toBe(false);
+    expect(/token:\s*EXECUTE_CONFIRM_TOKEN/.test(orch)).toBe(false);
+
+    // 4. COMPOSES the three proven pieces (imports each) and depends on the approval type from the CONTRACT.
+    expect(/from\s*['"]\.\.\/build-planner\/build-planner\.js['"]/.test(orchRaw)).toBe(true);
+    expect(/from\s*['"]\.\.\/\.\.\/layer-5-action\/filesystem-adapter-dryrun\/filesystem-adapter-dryrun\.js['"]/.test(orchRaw)).toBe(true);
+    expect(/from\s*['"]\.\.\/\.\.\/layer-5-action\/filesystem-executor\/filesystem-executor\.js['"]/.test(orchRaw)).toBe(true);
+    expect(/from\s*['"]\.\.\/\.\.\/layer-5-action\/governed-adapter\/governed-adapter\.js['"]/.test(orchRaw)).toBe(true);
+
+    // 5. DOUBLY-GATED, CANNOT SELF-CONFIRM — `execute` requires BOTH a ConsumedApproval AND a confirm argument,
+    //    and the SOLE executor call is confirm-gated: the confirm token check precedes the one executor call site.
+    expect(/execute\s*\([\s\S]*?approval:\s*ConsumedApproval[\s\S]*?confirm:\s*HumanExecuteConfirm/.test(orchRaw)).toBe(true);
+    expect((orch.match(/executeFilesystemPlan\s*\(/g) ?? []).length).toBe(1); // exactly one real-write delegation
+    expect(orch.indexOf('EXECUTE_CONFIRM_TOKEN')).toBeGreaterThan(-1);
+    expect(orch.indexOf('EXECUTE_CONFIRM_TOKEN')).toBeLessThan(orch.indexOf('executeFilesystemPlan(')); // gate precedes write
+
+    // AND the composition did NOT loosen 4e/4f/4g: the executor is STILL the sole importer of node:fs among these
+    // four, and the composed dry-run adapter + build planner STILL import no node:fs. (Re-checked so 4h can never
+    // silently mask a regression where the orchestrator smuggled a write capability into an incapable layer.)
+    const execRaw2 = readFileSync(join(SRC, 'layer-5-action', 'filesystem-executor', 'filesystem-executor.ts'), 'utf8');
+    expect(/from\s*['"]node:fs['"]/.test(execRaw2)).toBe(true); // executor: the ONE sanctioned writer
+    const plannerRaw2 = stripComments(readFileSync(join(SRC, 'layer-4-build-harden', 'build-planner', 'build-planner.ts'), 'utf8'));
+    const dryRunRaw2 = stripComments(readFileSync(join(SRC, 'layer-5-action', 'filesystem-adapter-dryrun', 'filesystem-adapter-dryrun.ts'), 'utf8'));
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(plannerRaw2)).toBe(false);
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(dryRunRaw2)).toBe(false);
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven

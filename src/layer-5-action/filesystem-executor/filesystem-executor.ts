@@ -15,7 +15,11 @@
 //   2. APPROVAL-GATED — it requires a genuine branded ConsumedApproval (../mcp-bridge/tool-classes.ts:100-104,
 //      re-exported by the governed-adapter contract). That token's mint is module-private to the bridge, so this
 //      executor CANNOT be reached without a real, dispatcher-minted approval, and it MINTS NOTHING itself. The
-//      presented token must be the one this plan is bound to: approval.approvalId === plan.boundToApprovalId.
+//      presented token must be the one THIS plan is bound to, on TWO independent axes that must BOTH hold:
+//      approval.approvalId === plan.boundToApprovalId AND approval.boundIntentHash === plan.boundIntentHash. The
+//      second is essential: approvalId is a per-gate counter that collides across gates, so a genuine approval
+//      minted for a DIFFERENT plan could share the id — only the content-derived intent hash makes the approval
+//      NON-TRANSFERABLE between plans. A mismatch on either ⇒ REFUSE, write nothing, audit the refusal.
 //   3. ALL-OR-NOTHING — the ENTIRE plan is validated (approval bound, every path in-jail, nothing pre-exists)
 //      BEFORE a single byte is written. If any check fails, it aborts and writes NOTHING (no partial scaffold).
 //   4. AUDIT BEFORE WRITE — the intent (which plan, which approval, which paths) is recorded and AWAITED BEFORE
@@ -269,9 +273,23 @@ export async function executeFilesystemPlan(
 ): Promise<ExecuteOutcome> {
   const tool = FILESYSTEM_EXECUTE_TOOL;
 
-  // 1. APPROVAL BINDING — the presented (genuine) token must be the one this plan was bound to.
-  if (!approval || approval.approvalId !== plan.boundToApprovalId) {
-    const reason = `approval is missing or not bound to this plan (approval "${approval?.approvalId ?? '<none>'}" ≠ plan.boundToApprovalId "${plan.boundToApprovalId}")`;
+  // 1. APPROVAL BINDING — the presented (genuine) token must be the one THIS plan was bound to. Two independent
+  //    bindings must BOTH hold, so a genuine approval minted for a DIFFERENT plan cannot be stapled to this one:
+  //      (a) approvalId — the plan records the approval id it was bound to (filesystem-adapter-dryrun.ts:141,
+  //          `boundToApprovalId: approval.approvalId`), matched against approval.approvalId. NECESSARY but NOT
+  //          sufficient: `approvalId` is a per-gate-instance counter (approval-gate.ts:141, `apr_${++counter}`),
+  //          so `apr_1` from one gate collides with `apr_1` from another — a valid approval for an unrelated
+  //          action can share this id. This check alone is transferable; it is kept (not weakened) and joined by:
+  //      (b) boundIntentHash — the CONTENT-derived fingerprint of the exact (tool, target, payload) the human
+  //          approved. The plan records it (filesystem-adapter-dryrun.ts:140, `boundIntentHash`) and the token
+  //          carries it (stamped at mint from the SAME binding — tool-classes.ts, ClassDispatcher.consume). It
+  //          does NOT collide across gates, so it is what makes an approval NON-TRANSFERABLE between plans.
+  //    Either mismatch ⇒ REFUSE, write nothing, audit the refusal.
+  if (!approval || approval.approvalId !== plan.boundToApprovalId || approval.boundIntentHash !== plan.boundIntentHash) {
+    const reason =
+      `approval is missing or not bound to this plan ` +
+      `(approvalId "${approval?.approvalId ?? '<none>'}" vs plan.boundToApprovalId "${plan.boundToApprovalId}"; ` +
+      `boundIntentHash "${approval?.boundIntentHash ?? '<none>'}" vs plan.boundIntentHash "${plan.boundIntentHash}")`;
     await ctx.audit.appendRefusal({
       tool, organization_id: ctx.organizationId, human_actor: ctx.human,
       stage: 'approval-binding', decision: 'REFUSE', reason, environment: ctx.environment,
