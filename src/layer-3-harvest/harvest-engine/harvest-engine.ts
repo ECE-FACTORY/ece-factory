@@ -137,7 +137,15 @@ export class HarvestEngine {
     }
 
     // --- recommendation (no verdict without evidence; §3.9 reuse-beats-rebuild flag) ---
-    const acceptableSourced = candidates.some((c) => c.eligibility === 'eligible' && c.scoreUsed >= 70);
+    // Confidence floor (mirrors harvest-orchestrator's split floor): a candidate only counts as an "acceptable
+    // sourced FORK/EXTEND" — capable of substantiating a reuse-beats-rebuild objection — if its pessimistic
+    // normalized score clears 70 AND it meets the promotion floor (≥3 dims measured) on BOTH scoring passes.
+    // §3.9 protects REUSE (FORK *or* EXTEND); EXTEND needs no air-gap, so the reuse floor is measuredCount ≥ 3.
+    // A high normalized score drawn from too few measured dimensions cannot justify blocking a BUILD.
+    const meetsFloor = (s: ScoreResult): boolean => s.measuredCount >= 3;
+    const acceptableSourced = candidates.some(
+      (c) => c.eligibility === 'eligible' && c.scoreUsed >= 70 && meetsFloor(c.scorePassA) && meetsFloor(c.scorePassB),
+    );
     let recVerdict: Verdict | 'NONE';
     if (input.proposedVerdict) recVerdict = input.proposedVerdict;
     else if (spine.spineType === 'justified-BUILD-spine') recVerdict = 'BUILD';

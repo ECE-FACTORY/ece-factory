@@ -6,11 +6,12 @@ import type { ScoreResult } from '../../layer-3-harvest/scoring-engine/scoring-e
 
 function score(total: number, maturity: number, rejected = false): ScoreResult {
   return {
-    subScores: [{ dimension: 'maturity', score: maturity, max: 20, evidence: 'm', flagged: false }],
+    subScores: [{ dimension: 'maturity', score: maturity, max: 20, evidence: 'm', flagged: false, measured: true }],
     total,
     rejected,
     band: rejected ? 'reject' : total >= 85 ? 'strong' : total >= 70 ? 'acceptable' : total >= 55 ? 'risky' : 'reject',
     flags: [],
+    measuredCount: 1, measuredWeightFraction: 0.2, // type-conformance fixture; product-spine reads maturity/total, not these
   };
 }
 const cand = (id: string, total: number, maturity: number, rejected = false): SpineCandidate => ({ id, score: score(total, maturity, rejected) });

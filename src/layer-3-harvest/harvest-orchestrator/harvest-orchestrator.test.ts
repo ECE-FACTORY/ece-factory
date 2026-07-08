@@ -79,26 +79,34 @@ describe('Harvest Orchestrator — reviewer re-derivation (pure, agrees AND disa
   });
 });
 
-// synthetic graded candidates to exercise EVERY branch of the decision mapping directly
-function score(total: number, band: ScoreBand, unassessedFlagged = true): ScoreResult {
-  const dim = (dimension: string, flagged: boolean) => ({ dimension, score: 0, max: 20, evidence: 'x', flagged });
-  return {
-    subScores: [dim('license', false), dim('maturity', false), dim('air-gap', unassessedFlagged), dim('white-label', unassessedFlagged), dim('arch-fit', unassessedFlagged), dim('maintainability', unassessedFlagged)],
-    total, band, rejected: band === 'reject' && total < 20, flags: [],
-  };
+// synthetic graded candidates to exercise EVERY branch of the decision mapping directly. `measuredDims` drives the
+// SPLIT confidence floor: measuredCount + WHICH dims were measured (air-gap gates FORK). Default = license+maturity
+// (2 dims), i.e. a base "scout sourced license + maturity only" pass.
+const DIM_MAX: Record<string, number> = { license: 20, maturity: 20, 'air-gap': 20, 'white-label': 15, 'arch-fit': 15, maintainability: 10 };
+const ALL_DIMS = ['license', 'maturity', 'air-gap', 'white-label', 'arch-fit', 'maintainability'] as const;
+function score(total: number, band: ScoreBand, measuredDims: readonly string[] = ['license', 'maturity']): ScoreResult {
+  const subScores = ALL_DIMS.map((dimension) => ({
+    dimension, score: 0, max: DIM_MAX[dimension]!, evidence: 'x', flagged: !measuredDims.includes(dimension), measured: measuredDims.includes(dimension),
+  }));
+  const measuredWeight = subScores.filter((s) => s.measured).reduce((w, s) => w + s.max, 0);
+  return { subScores, total, band, rejected: band === 'reject' && total < 20, flags: [], measuredCount: measuredDims.length, measuredWeightFraction: measuredWeight / 100 };
 }
-function gc(p: { owner?: string; name?: string; eligibility: RepoEvaluationRecord['eligibility']; licenseDecision: LicenseDecision; total: number; band: ScoreBand; stars?: number; unassessedFlagged?: boolean }): GradedCandidate {
-  const record = {
+function mkRecord(p: { owner?: string; name?: string; eligibility: RepoEvaluationRecord['eligibility']; licenseDecision: LicenseDecision; stars?: number }): RepoEvaluationRecord {
+  return {
     evaluatedAtIso: '2026-07-07T00:00:00.000Z', identity: { host: 'github.com', owner: p.owner ?? 'o', name: p.name ?? 'n' },
     licenseDetected: 'MIT', licenseDecision: p.licenseDecision, eligibility: p.eligibility, provenanceVerified: true,
     maturity: { stars: p.stars ?? 100 }, airGapSuitability: 'unknown', whiteLabelFit: 'unknown', architectureFitNotes: null,
     priorVerdict: null, readme: null, description: null, status: 'recorded',
   } as RepoEvaluationRecord;
-  const sc = score(p.total, p.band, p.unassessedFlagged ?? true);
+}
+function gc(p: { owner?: string; name?: string; eligibility: RepoEvaluationRecord['eligibility']; licenseDecision: LicenseDecision; total: number; band: ScoreBand; stars?: number; measuredDims?: readonly string[] }): GradedCandidate {
+  return gcWith(score(p.total, p.band, p.measuredDims ?? ['license', 'maturity']), mkRecord(p));
+}
+// Wrap a REAL ScoreResult (e.g. straight from enrichScore) into a GradedCandidate so decideSourcing can grade it.
+function gcWith(sc: ScoreResult, rec: RepoEvaluationRecord = mkRecord({ eligibility: 'eligible', licenseDecision: 'ACCEPT' })): GradedCandidate {
   return {
-    repoUrl: 'u', identity: record.identity, record, score: sc, licenseOneLine: 'MIT License', licenseVerified: true, licenseDisagreement: false, rawLicenseText: MIT_TEXT, notes: [],
-    // default: no signals gathered ⇒ graded exactly as a license+maturity-only pass (applied:false).
-    enrichment: { applied: false, status: 'NONE', totalBefore: p.total, totalAfter: p.total, bandBefore: p.band, bandAfter: p.band, dimensions: [] },
+    repoUrl: 'u', identity: rec.identity, record: rec, score: sc, licenseOneLine: 'MIT License', licenseVerified: true, licenseDisagreement: false, rawLicenseText: MIT_TEXT, notes: [],
+    enrichment: { applied: false, status: 'NONE', totalBefore: sc.total, totalAfter: sc.total, bandBefore: sc.band, bandAfter: sc.band, dimensions: [] },
   };
 }
 
@@ -109,19 +117,42 @@ describe('Harvest Orchestrator — decideSourcing mapping (from REAL score bands
   it('all REJECT / none eligible ⇒ BUILD (genuine absence of a permissive repo)', () => {
     expect(decideSourcing([gc({ eligibility: 'not-eligible', licenseDecision: 'REJECT', total: 0, band: 'reject' })]).decision).toBe('BUILD');
   });
-  it('eligible spine, band acceptable (≥70) ⇒ FORK', () => {
-    expect(decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 72, band: 'acceptable' })]).decision).toBe('FORK');
+  it('eligible spine, band acceptable (≥70) + ≥3 measured INCLUDING air-gap ⇒ FORK', () => {
+    // SPLIT FLOOR: FORK now requires air-gap MEASURED. measuredDims = license+maturity+air-gap (3, incl. air-gap).
+    expect(decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 72, band: 'acceptable', measuredDims: ['license', 'maturity', 'air-gap'] })]).decision).toBe('FORK');
   });
-  it('eligible spine, band risky (55–69) ⇒ EXTEND', () => {
-    expect(decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 60, band: 'risky' })]).decision).toBe('EXTEND');
+  it('eligible spine, band risky (55–69) + ≥3 measured (no air-gap needed) ⇒ EXTEND', () => {
+    // SPLIT FLOOR: EXTEND requires ≥3 measured + score ≥55, but NOT air-gap. measuredDims = license+maturity+arch (no air-gap).
+    expect(decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 60, band: 'risky', measuredDims: ['license', 'maturity', 'arch-fit'] })]).decision).toBe('EXTEND');
   });
-  it('eligible permissive spine, low band ONLY due to unassessed dims ⇒ NEEDS-ASSESSMENT (not a false BUILD)', () => {
-    const r = decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 38, band: 'reject', unassessedFlagged: true })]);
+  it('eligible spine ≥70 but < 3 measured dims ⇒ REFUSES FORK/EXTEND ⇒ NEEDS-ASSESSMENT (the floor)', () => {
+    // 2 measured dims only (base-like). High score, but below the confidence floor of 3.
+    const r = decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 95, band: 'strong', measuredDims: ['license', 'maturity'] })]);
     expect(r.decision).toBe('NEEDS-ASSESSMENT');
-    expect(r.evidence.join(' ')).toMatch(/reuse-beats-rebuild|deny-by-default/);
+    expect(r.evidence.join(' ')).toMatch(/< confidence floor of 3/);
+  });
+  it('eligible spine ≥70 + ≥3 measured but WITHOUT air-gap ⇒ EXTEND, never FORK (air-gap gates FORK)', () => {
+    // license+maturity+maintainability measured (3, NO air-gap); score ≥70. FORK needs air-gap ⇒ demoted to EXTEND.
+    const r = decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 82, band: 'acceptable', measuredDims: ['license', 'maturity', 'maintainability'] })]);
+    expect(r.decision).toBe('EXTEND');
+    expect(r.decision).not.toBe('FORK');
+    expect(r.evidence.join(' ')).toMatch(/air-gap UNMEASURED/);
+    expect(r.evidence.join(' ')).toMatch(/HUMAN APPROVAL REQUIRED: air-gap/); // air-gap flagged still-needs-human
+  });
+  it('eligible spine, band reject (<55) ⇒ NEEDS-ASSESSMENT (not a false BUILD)', () => {
+    const r = decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 38, band: 'reject', measuredDims: ['license', 'maturity'] })]);
+    expect(r.decision).toBe('NEEDS-ASSESSMENT');
+    expect(r.evidence.join(' ')).toMatch(/reuse-beats-rebuild/);
   });
   it('candidates exist but NEEDS_REVIEW / unverified (none eligible, some permissive) ⇒ NEEDS-ASSESSMENT', () => {
     expect(decideSourcing([gc({ eligibility: 'needs-review', licenseDecision: 'NEEDS_REVIEW', total: 10, band: 'reject' })]).decision).toBe('NEEDS-ASSESSMENT');
+  });
+  it('FORK evidence names the unmeasured dimensions at decision time (glass-box)', () => {
+    // measured license+maturity+air-gap ⇒ FORK; unmeasured = white-label, arch-fit, maintainability must be listed.
+    const r = decideSourcing([gc({ eligibility: 'eligible', licenseDecision: 'ACCEPT', total: 78, band: 'acceptable', measuredDims: ['license', 'maturity', 'air-gap'] })]);
+    expect(r.decision).toBe('FORK');
+    expect(r.evidence.join(' ')).toMatch(/unmeasured at decision:.*white-label/);
+    expect(r.evidence.join(' ')).toMatch(/HUMAN APPROVAL REQUIRED: white-label/); // white-label unmeasured ⇒ flagged
   });
 });
 
@@ -167,6 +198,19 @@ describe('Harvest Orchestrator — full run() over the REAL graders with a fake 
     expect(dec['contract-lifecycle']).toBe('NEEDS-ASSESSMENT'); // permissive+maintained but unassessed dims
     expect(dec['e-signature']).toBe('BUILD');                   // BSL only ⇒ no permissive repo
     expect(dec['clause-template-library']).toBe('BUILD');       // no candidates
+  });
+
+  it('REGRESSION PIN: recalibration does NOT retro-promote the Legal-Ops MIT spine (2 dims measured ⇒ NEEDS-ASSESSMENT)', async () => {
+    // The whole point of the fix must NOT falsely promote a repo assessed on license+maturity only. The scout
+    // sources exactly 2 dimensions ⇒ measuredCount 2 < the floor of 3 ⇒ NEEDS-ASSESSMENT, even though the
+    // normalized score is high (license 20 + maturity 18 = 38; 38/40×100 = 95).
+    const orch = new HarvestOrchestrator(fakeScout(byQuery), { now: FIXED_NOW }); // no signals port ⇒ 2 dims only
+    const res = await orch.run('Legal & Contract Operations');
+    const clm = res.report!.subDomains.find((r) => r.subDomain.key === 'contract-lifecycle')!;
+    expect(clm.spine!.score.total).toBe(95);            // normalized, high — but confidence is low
+    expect(clm.spine!.score.measuredCount).toBe(2);     // only license + maturity sourced
+    expect(clm.decision).toBe('NEEDS-ASSESSMENT');
+    expect(clm.decisionEvidence.join(' ')).toMatch(/< confidence floor of 3/);
   });
 
   it('reviewer re-derivation AGREES with the assembler on the honest MIT/air-gap facts', async () => {
@@ -269,14 +313,17 @@ describe('enrichScore — CONFIDENCE CONTRACT (pure, deterministic)', () => {
     expect(enrichment.bandBefore).toBe(enrichment.bandAfter);
   });
 
-  it('MEASURED good maintainability + architecture SHARPEN the band (reject→risky) at full weight', () => {
+  it('MEASURED good maintainability + architecture raise measuredCount 2→4 and normalize to 90.8 (strong)', () => {
+    // RECALIBRATION (normalize over measured dims): base measured = license 20 + maturity 18 (4200★); 38/40×100 = 95.0 → strong.
     const base = baseScoreOf(MIT_INPUTS);
-    expect(base.total).toBe(38); expect(base.band).toBe('reject');
+    expect(base.total).toBe(95); expect(base.band).toBe('strong'); expect(base.measuredCount).toBe(2);
     const { score, enrichment } = enrichScore(MIT_INPUTS, base, okSignals('acme', 'clm')); // clean + good, both measured
-    expect(byDim(score)['maintainability']).toBe(10); // 'clean' at full weight
+    expect(byDim(score)['maintainability']).toBe(10); // 'clean' at full weight (raw dim points unchanged)
     expect(byDim(score)['arch-fit']).toBe(11);        // 'good' at full weight
-    expect(score.total).toBe(59);                      // 38 + 10 + 11
-    expect(score.band).toBe('risky');                  // reject → risky = SHARPENED
+    // measured = license 20 + maturity 18 + maint 10 + arch 11 = 59 pts; measured max = 20+20+10+15 = 65; 59/65×100 = 90.769 → 90.8
+    expect(score.total).toBe(90.8);
+    expect(score.measuredCount).toBe(4);               // the enrichment's real work: confidence 2→4 (what the floor turns on)
+    expect(score.band).toBe('strong');                 // 90.8 ≥ 85 (enrichment DILUTES the 95 base by averaging in arch 73%, but stays strong)
     // The movement is TRACEABLE to the specific measured signals.
     const maint = enrichment.dimensions.find((d) => d.dimension === 'maintainability')!;
     expect(maint).toMatchObject({ confidence: 'measured', value: 'clean', influence: 'raised', pointsBefore: 0, pointsAfter: 10 });
@@ -289,10 +336,11 @@ describe('enrichScore — CONFIDENCE CONTRACT (pure, deterministic)', () => {
     const base = baseScoreOf(MIT_INPUTS);
     // arch 'good' but only PARTIAL confidence (tree-only, no manifest) ⇒ must be bounded to 'possible' (6).
     const { score, enrichment } = enrichScore(MIT_INPUTS, base, okSignals('acme', 'clm', { arch: ['good', 'partial'], maint: ['maintainable', 'measured'] }));
-    expect(byDim(score)['arch-fit']).toBe(6);   // bounded — NOT 11
+    expect(byDim(score)['arch-fit']).toBe(6);   // bounded — NOT 11 (the bound still works at the DIM level)
     expect(byDim(score)['maintainability']).toBe(7);
-    expect(score.total).toBe(51);                // 38 + 7 + 6 — still < 55
-    expect(score.band).toBe('reject');           // bounded partial did NOT over-promote it
+    // measured = license 20 + maturity 18 + maint 7 + arch 6 (bounded) = 51 pts; measured max = 65; 51/65×100 = 78.46 → 78.5
+    expect(score.total).toBe(78.5);
+    expect(score.band).toBe('acceptable');       // 78.5 ≥ 70: the OTHER measured dims are strong, so the average is high even with a weak bounded arch
     const arch = enrichment.dimensions.find((d) => d.dimension === 'architecture')!;
     expect(arch).toMatchObject({ confidence: 'partial', influence: 'bounded', pointsAfter: 6 });
   });
@@ -314,14 +362,17 @@ describe('enrichScore — CONFIDENCE CONTRACT (pure, deterministic)', () => {
     expect(byDim(score)['air-gap']).toBe(0);       // negative evidence never becomes a positive score
   });
 
-  it('the enriched score CANNOT reach FORK: air-gap + white-label deny-by-default cap it at "risky" (≤59)', () => {
+  it('the enriched candidate CANNOT reach FORK: the signals scout never measures air-gap ⇒ EXTEND at most', () => {
+    // RECALIBRATION: the invariant "no machine auto-FORK" now holds via the FLOOR, not by capping the band. The
+    // enriched normalized score is HIGH (90.8, strong), but FORK requires air-gap MEASURED — the signals scout
+    // never sources it — so decideSourcing yields EXTEND, never FORK.
     const base = baseScoreOf(MIT_INPUTS);
-    // Best possible measured signals AND a permissive air-gap partial: still cannot cross 70 (acceptable/FORK).
     const { score } = enrichScore(MIT_INPUTS, base, okSignals('acme', 'clm', { maint: ['clean', 'measured'], arch: ['good', 'measured'] }));
-    expect(score.total).toBeLessThanOrEqual(59);
-    expect(['reject', 'risky']).toContain(score.band);
-    expect(score.band).not.toBe('acceptable');
-    expect(score.band).not.toBe('strong');
+    expect(score.total).toBe(90.8);                                                   // 59/65×100 (see above)
+    expect(score.subScores.find((s) => s.dimension === 'air-gap')!.measured).toBe(false); // scout never measures air-gap
+    const decision = decideSourcing([gcWith(score)]).decision;
+    expect(decision).toBe('EXTEND'); // ≥3 measured (4) + ≥55, no air-gap ⇒ EXTEND
+    expect(decision).not.toBe('FORK');
   });
 
   it('signals FAILED_CLOSED ⇒ graded exactly as today (base score verbatim, no fabrication)', () => {
@@ -340,19 +391,24 @@ describe('Harvest Orchestrator — full run() WITH signals port (enrichment shar
   const scoutByQuery: Record<string, ScoutResult> = {};
   for (const s of subs) scoutByQuery[s.query] = ok(s.query, mit());
 
-  it('MEASURED signals sharpen contract-lifecycle NEEDS-ASSESSMENT → EXTEND, traced to the signal evidence', async () => {
+  it('MEASURED signals promote contract-lifecycle NEEDS-ASSESSMENT → EXTEND (confidence crosses the floor), traced', async () => {
     const signals = fakeSignals({ 'acme/clm': okSignals('acme', 'clm') });
     const orch = new HarvestOrchestrator(fakeScout(scoutByQuery), { now: FIXED_NOW, signalsPort: signals });
     const res = await orch.run('Legal & Contract Operations');
     const clm = res.report!.subDomains.find((r) => r.subDomain.key === 'contract-lifecycle')!;
+    // DECISION PRESERVED (still EXTEND) but via a NEW mechanism: enrichment raises measuredCount 2→4 across the
+    // floor of 3 (air-gap still unmeasured ⇒ EXTEND, never FORK). The score itself is 90.8 (see enrichScore tests),
+    // so band is 'strong', not 'risky' — the OLD additive 59/'risky' is gone.
     expect(clm.decision).toBe('EXTEND');                       // was NEEDS-ASSESSMENT without signals
-    expect(clm.spine!.score.band).toBe('risky');
+    expect(clm.spine!.score.band).toBe('strong');              // 90.8 normalized (was 'risky' under the old additive 59)
+    expect(clm.spine!.score.measuredCount).toBe(4);
     expect(clm.spine!.enrichment.applied).toBe(true);
-    expect(clm.spine!.enrichment.bandBefore).toBe('reject');
-    expect(clm.spine!.enrichment.bandAfter).toBe('risky');
-    // the decision evidence attributes the change to the exact measured signals
-    expect(clm.decisionEvidence.join(' ')).toMatch(/enrichment sharpened band reject→risky/);
+    expect(clm.spine!.enrichment.bandBefore).toBe('strong');   // base 95 (license+maturity only) already bands strong
+    expect(clm.spine!.enrichment.bandAfter).toBe('strong');    // enrichment does not move the band; it moves confidence
+    // the decision evidence attributes the change to the exact measured signals, and flags air-gap still-needs-human
+    expect(clm.decisionEvidence.join(' ')).toMatch(/enrichment refined score 95→90\.8/);
     expect(clm.decisionEvidence.join(' ')).toMatch(/maintainability=clean \(measured/);
+    expect(clm.decisionEvidence.join(' ')).toMatch(/air-gap UNMEASURED/);
     // report renders the confidence-gated column
     expect(res.reportMarkdown!).toContain('Signals (confidence-gated)');
     expect(res.reportMarkdown!).toMatch(/maintainability=clean\(meas/);
@@ -387,12 +443,17 @@ describe('Harvest Orchestrator — full run() WITH signals port (enrichment shar
     expect(clm.spine!.enrichment.applied).toBe(false); // throw ⇒ null ⇒ deny-by-default
   });
 
-  it('PARTIAL-only architecture keeps contract-lifecycle at NEEDS-ASSESSMENT (weak/bounded, no over-promotion)', async () => {
+  it('PARTIAL architecture (bounded at dim level) still normalizes to EXTEND — air-gap flagged for a human', async () => {
+    // VERDICT CHANGE (NEEDS-ASSESSMENT → EXTEND) under the split floor. Rationale: the arch signal is still BOUNDED
+    // at the dim level (6, not 11), but measured = license 20 + maturity 18 + maint 7 + arch 6 = 51 pts / 65 max
+    // ×100 = 78.5 (≥55) with 4 dims measured ⇒ EXTEND. The old NEEDS-ASSESSMENT was an artifact of the additive
+    // cap (51 < 55); the honest normalized score is 78.5. Air-gap unmeasured ⇒ EXTEND (never FORK), flagged.
     const signals = fakeSignals({ 'acme/clm': okSignals('acme', 'clm', { arch: ['good', 'partial'], maint: ['maintainable', 'measured'] }) });
     const orch = new HarvestOrchestrator(fakeScout(scoutByQuery), { now: FIXED_NOW, signalsPort: signals });
     const res = await orch.run('Legal & Contract Operations');
     const clm = res.report!.subDomains.find((r) => r.subDomain.key === 'contract-lifecycle')!;
-    expect(clm.spine!.score.total).toBe(51);         // bounded partial arch (6) + measured maint (7)
-    expect(clm.decision).toBe('NEEDS-ASSESSMENT');    // still short of risky ⇒ human assessment still required
+    expect(clm.spine!.score.total).toBe(78.5);       // 51/65×100 — bounded partial arch (6) + measured maint (7)
+    expect(clm.decision).toBe('EXTEND');
+    expect(clm.decisionEvidence.join(' ')).toMatch(/air-gap UNMEASURED/); // FORK still needs a human air-gap assessment
   });
 });

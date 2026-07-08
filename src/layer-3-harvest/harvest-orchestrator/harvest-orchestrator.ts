@@ -196,8 +196,6 @@ export function reviewAirGap(claimed: string, hasDeploymentEvidence: boolean): {
 
 // ── Stage 3b (pure): confidence-gated enrichment — the CONFIDENCE CONTRACT, encoded ────────────────────
 
-const FOUR_DIMS = ['air-gap', 'white-label', 'arch-fit', 'maintainability'];
-
 /** Bound a PARTIAL architecture rating to a WEAK contribution: never better than 'possible' (6/15, flagged).
  *  A partial (tree-only) architecture signal must not earn the full 'good' (11) that a manifest-MEASURED one
  *  would — that is the whole point of "partial contributes weakly, within bounds". 'poor' stays 'poor'. */
@@ -291,38 +289,15 @@ function buildDimensionTrace(base: ScoreResult, enriched: ScoreResult, signals: 
   ];
 }
 
-/** Sub-score dimensions the signals actually ASSESSED (measured maint, or measured/partial architecture).
- *  air-gap + white-label are NEVER "assessed" by machine — a human must still judge them, so they always
- *  remain unassessed headroom (see shortfallIsUnassessed). */
-function assessedDims(enrichment: EnrichmentTrace | undefined): Set<string> {
-  const out = new Set<string>();
-  if (!enrichment?.applied) return out;
-  for (const d of enrichment.dimensions) {
-    if (d.dimension === 'maintainability' && d.confidence === 'measured' && d.value !== 'unknown') out.add('maintainability');
-    if (d.dimension === 'architecture' && (d.confidence === 'measured' || d.confidence === 'partial') && d.value !== 'unknown') out.add('arch-fit');
-  }
-  return out;
-}
-
 // ── Stage 4 (pure): decision from the real (possibly enriched) score ───────────────────────────────────
-
-/** Is the sub-55 band still driven by dimensions NOBODY has assessed yet — rather than a proven weakness?
- *  A candidate is "merely unassessed" if the points still available on genuinely-unassessed dimensions
- *  (air-gap + white-label always; arch/maint only when no signal measured them) could still carry the total
- *  to 'risky' (≥55). A MEASURED-low dimension is ASSESSED (a real finding) and does NOT count as headroom. */
-function shortfallIsUnassessed(spine: GradedCandidate): boolean {
-  const assessed = assessedDims(spine.enrichment);
-  const headroom = spine.score.subScores
-    .filter((s) => FOUR_DIMS.includes(s.dimension) && s.flagged && !assessed.has(s.dimension))
-    .reduce((h, s) => h + (s.max - s.score), 0);
-  return spine.score.total + headroom >= 55; // still reachable to risky by assessing what's unassessed
-}
 
 export function decideSourcing(candidates: GradedCandidate[]): { decision: SourcingDecision; evidence: string[] } {
   const evidence: string[] = [];
   if (candidates.length === 0) {
     return { decision: 'BUILD', evidence: ['no candidate repositories discovered for this sub-domain'] };
   }
+  // Eligibility precondition + hard gates run BEFORE any banding — an ineligible/REJECT candidate never reaches
+  // the score→verdict mapping. UNCHANGED.
   const eligible = candidates.filter((c) => c.record.eligibility === 'eligible');
   const anyPermissive = candidates.some((c) => c.record.licenseDecision !== 'REJECT');
   if (eligible.length === 0) {
@@ -330,30 +305,69 @@ export function decideSourcing(candidates: GradedCandidate[]): { decision: Sourc
     return { decision: 'NEEDS-ASSESSMENT', evidence: ['candidates exist but none are yet eligible (license NEEDS_REVIEW / provenance unverified) — human ratification needed'] };
   }
   const spine = pickSpine(eligible);
-  evidence.push(`spine: ${spine.identity.owner}/${spine.identity.name} — real score ${spine.score.total}/100, band "${spine.score.band}"`);
-  // TRACEABILITY: if enrichment moved the band, record EXACTLY which measured/bounded signals justified it —
-  // a verdict that changed must be attributable to specific fetched evidence (the confidence contract).
-  if (spine.enrichment?.applied && spine.enrichment.bandAfter !== spine.enrichment.bandBefore) {
+  const { total, band, measuredCount } = spine.score;
+  evidence.push(`spine: ${spine.identity.owner}/${spine.identity.name} — real score ${total}/100, band "${band}" (${measuredCount}/6 dims measured, coverage ${Math.round(spine.score.measuredWeightFraction * 100)}%)`);
+  // TRACEABILITY: if enrichment MATERIALLY changed the score (total or band), record EXACTLY which measured/bounded
+  // signals justified it — a verdict that changed must be attributable to specific fetched evidence. Under
+  // normalization the band often does NOT move (a base measured on 2 strong dims already bands high), yet enrichment
+  // still adds MEASURED dimensions that raise the confidence/measuredCount that the floor turns on — so we trigger
+  // on any total/band change, not band alone.
+  if (spine.enrichment?.applied && (spine.enrichment.totalAfter !== spine.enrichment.totalBefore || spine.enrichment.bandAfter !== spine.enrichment.bandBefore)) {
     const moved = spine.enrichment.dimensions.filter((d) => d.influence !== 'none')
       .map((d) => `${d.dimension}=${d.value} (${d.confidence}, +${d.pointsAfter - d.pointsBefore})`).join(', ');
-    evidence.push(`enrichment sharpened band ${spine.enrichment.bandBefore}→${spine.enrichment.bandAfter} (total ${spine.enrichment.totalBefore}→${spine.enrichment.totalAfter}) — justified ONLY by: ${moved || 'no positive signal'}`);
+    evidence.push(`enrichment refined score ${spine.enrichment.totalBefore}→${spine.enrichment.totalAfter} (band ${spine.enrichment.bandBefore}→${spine.enrichment.bandAfter}) — justified ONLY by: ${moved || 'no positive signal'}`);
   }
-  if (spine.score.band === 'strong' || spine.score.band === 'acceptable') {
-    return { decision: 'FORK', evidence: [...evidence, 'score ≥ 70 (acceptable/strong) — fork and white-label'] };
+
+  // ── CONFIDENCE FLOOR (SPLIT by stakes) ──
+  //   FORK   (high commitment): normalized ≥ 70 (acceptable/strong) AND ≥3 dims measured AND air-gap MEASURED.
+  //           A machine NEVER auto-forks without a human-confirmed air-gap dimension (sovereign hard gate); the
+  //           signals scout never sources air-gap, so a FORK always requires a human.
+  //   EXTEND (lower commitment): ≥3 dims measured AND normalized ≥ 55 (risky/acceptable/strong), but NOT a
+  //           qualified FORK (either < 70 OR air-gap unmeasured). Air-gap left unmeasured is FLAGGED as
+  //           still-needs-human — enrichment can promote NEEDS-ASSESSMENT→EXTEND on real measured evidence, but
+  //           can never manufacture a FORK.
+  //   else   normalized < 55 OR < 3 dims measured ⇒ NEEDS-ASSESSMENT.
+  // Unmeasured dims are EXCLUDED from the score (never assumed good) — the floor, not a deny-by-default 0, is what
+  // holds an under-assessed repo back.
+  const airGapMeasured = spine.score.subScores.some((s) => s.dimension === 'air-gap' && s.measured);
+  const whiteLabelMeasured = spine.score.subScores.some((s) => s.dimension === 'white-label' && s.measured);
+  const enoughMeasured = measuredCount >= 3;
+  const scorePassesFork = band === 'strong' || band === 'acceptable'; // normalized ≥ 70
+  const scorePassesExtend = scorePassesFork || band === 'risky';       // normalized ≥ 55
+  const unmeasured = spine.score.subScores.filter((s) => !s.measured).map((s) => s.dimension);
+  const unmeasuredLine = `unmeasured at decision: ${unmeasured.length ? unmeasured.join(', ') : 'none'}`;
+
+  // GLASS-BOX: a FORK/EXTEND must never be silent about a sovereign-relevant dimension it did NOT assess. Raise a
+  // human-approval flag for any unmeasured air-gap / white-label on a promotion — mirrors the air-gap<10 gate.
+  const promotionFlags = (): string[] => {
+    const f: string[] = [];
+    if (!airGapMeasured) f.push('HUMAN APPROVAL REQUIRED: air-gap is UNMEASURED — a human must assess the sovereign air-gap dimension before this becomes a FORK (a machine never auto-forks without measured air-gap)');
+    if (!whiteLabelMeasured) f.push('HUMAN APPROVAL REQUIRED: white-label is UNMEASURED — a human must assess rebrand/telemetry friction before adoption');
+    return f;
+  };
+
+  // FORK — full confidence (air-gap measured).
+  if (enoughMeasured && airGapMeasured && scorePassesFork) {
+    return { decision: 'FORK', evidence: [...evidence, `normalized ${total}/100 ≥ 70 (${band}), ${measuredCount}/6 dims measured incl. air-gap — FORK: fork and white-label`, unmeasuredLine, ...promotionFlags()] };
   }
-  if (spine.score.band === 'risky') {
-    return { decision: 'EXTEND', evidence: [...evidence, 'score 55–69 (risky) — fork then build the gap'] };
+  // EXTEND — partial confidence (≥3 measured, score ≥ 55, but not a qualified FORK). Air-gap flagged if unmeasured.
+  if (enoughMeasured && scorePassesExtend) {
+    const reason = !airGapMeasured
+      ? `normalized ${total}/100 ≥ 55 on ${measuredCount}/6 measured dims, but air-gap UNMEASURED — EXTEND (fork then build the gap); air-gap still needs a human before any FORK`
+      : `normalized ${total}/100 in 55–69 (risky) with ${measuredCount}/6 dims measured — EXTEND: fork then build the gap`;
+    return { decision: 'EXTEND', evidence: [...evidence, reason, unmeasuredLine, ...promotionFlags()] };
   }
-  // band 'reject' (< 55): distinguish a genuinely weak repo from one merely UN-ASSESSED on 4 dimensions.
-  if (spine.record.licenseDecision !== 'REJECT' && shortfallIsUnassessed(spine)) {
-    return {
-      decision: 'NEEDS-ASSESSMENT',
-      evidence: [...evidence,
-        'low score is driven ENTIRELY by dimensions the scout does not source (air-gap, white-label, arch-fit, maintainability) — deny-by-default, NOT a proven weakness',
-        'reuse-beats-rebuild: a permissive, maintained repo must be assessed on those dimensions before any BUILD (Write-Asks-Read-First / §3.9)'],
-    };
-  }
-  return { decision: 'BUILD', evidence: [...evidence, 'spine rejected on assessed evidence (e.g. license) — build justified'] };
+
+  // else — normalized < 55 (genuinely weak on measured dims) OR < 3 dims measured (too little assessed). For an
+  // ELIGIBLE, permissive spine this is NEEDS-ASSESSMENT — nothing proves a rebuild is needed.
+  const why = !enoughMeasured
+    ? `only ${measuredCount}/6 dimensions measured (< confidence floor of 3) — too little assessed to FORK/EXTEND, regardless of the ${total}/100 partial score`
+    : `normalized ${total}/100 is below 55 on ${measuredCount} measured dimensions — genuinely weak on what was assessed`;
+  return {
+    decision: 'NEEDS-ASSESSMENT',
+    evidence: [...evidence, why, unmeasuredLine,
+      'reuse-beats-rebuild: assess the unmeasured dimensions before any BUILD (Write-Asks-Read-First / §3.9) — unmeasured dims are excluded from the score, NOT assumed good or bad'],
+  };
 }
 
 function pickSpine(eligible: GradedCandidate[]): GradedCandidate {

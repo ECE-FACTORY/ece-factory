@@ -88,3 +88,34 @@ describe('Scoring Engine — deny-by-default (pessimistic on missing evidence)',
     expect(sub(r, 'maturity').flagged).toBe(true);
   });
 });
+
+describe('Scoring Engine — normalize over MEASURED dims + confidence carried', () => {
+  it('INVARIANT: all six dims measured ⇒ normalized total equals the old plain sum (98), coverage 1.0', () => {
+    // Proof that normalization is a NO-OP when everything is measured: denominator is the full 100.
+    const r = scoreCandidate(clean());
+    expect(r.total).toBe(98);
+    expect(r.measuredCount).toBe(6);
+    expect(r.measuredWeightFraction).toBe(1);
+  });
+  it('an UNMEASURED dimension is EXCLUDED from the denominator (never scored 0)', () => {
+    // license 20 + maturity 18 only (air-gap/white-label/arch/maint unmeasured): 38/40×100 = 95, NOT 38/100.
+    const r = scoreCandidate({ license: { decision: 'ACCEPT', detected: 'MIT' }, maturity: { activelyMaintained: true, stars: 4200 } });
+    expect(r.total).toBe(95);
+    expect(r.measuredCount).toBe(2);
+    expect(r.measuredWeightFraction).toBe(0.4);          // 40 / 100
+    expect(sub(r, 'air-gap').measured).toBe(false);       // excluded from the denominator...
+    expect(sub(r, 'air-gap').score).toBe(0);              // ...but still DISPLAYS 0 + flag
+  });
+  it('a MEASURED-but-bad dimension is measured:true (a real negative finding, not an absence of evidence)', () => {
+    const r = scoreCandidate({ ...clean(), airGap: 'no' }); // air-gap OBSERVED as "no" ⇒ measured AND flagged
+    expect(sub(r, 'air-gap').measured).toBe(true);
+    expect(sub(r, 'air-gap').flagged).toBe(true);
+  });
+  it('§3.9 does NOT fire below the confidence floor (<3 measured) regardless of a high normalized score', () => {
+    // 2 dims measured, normalized 95, steered to BUILD — too little assessed to substantiate reuse-beats-rebuild.
+    const r = scoreCandidate({ license: { decision: 'ACCEPT', detected: 'MIT' }, maturity: { activelyMaintained: true, stars: 4200 }, proposedVerdict: 'BUILD' });
+    expect(r.total).toBe(95);
+    expect(r.measuredCount).toBe(2);
+    expect(r.flags.join('\n')).not.toMatch(/§3\.9/);
+  });
+});

@@ -26,7 +26,7 @@ import type { WhiteLabelVerdict } from '../../layer-4-build-harden/white-label/w
 function engines(over: { license?: ComplianceResult['decision']; detected?: string; band?: ScoreBand; total?: number; sovereign?: SovereignVerdict; whiteLabel?: WhiteLabelVerdict } = {}): SourcingEngines {
   return {
     classifyLicense: () => ({ decision: over.license ?? 'ACCEPT', detected: over.detected ?? 'MIT', reason: 'x', badgeContradiction: false } as ComplianceResult),
-    scoreCandidate: () => ({ subScores: [], total: over.total ?? 90, rejected: over.band === 'reject', band: over.band ?? 'strong', flags: [] } as ScoreResult),
+    scoreCandidate: () => ({ subScores: [], total: over.total ?? 90, rejected: over.band === 'reject', band: over.band ?? 'strong', flags: [], measuredCount: 6, measuredWeightFraction: 1 } as ScoreResult), // measuredCount/fraction: type-conformance only, not read by the composer
     assessSovereignReadiness: () => ({ verdict: over.sovereign ?? 'Acceptable' }),
     assessWhiteLabel: () => ({ verdict: over.whiteLabel ?? 'Ready' }),
   };
@@ -118,7 +118,7 @@ describe('ExternalHarvestComposer — composes the EXISTING engines (injected po
     const calls: string[] = [];
     const spy: SourcingEngines = {
       classifyLicense: () => { calls.push('license'); return { decision: 'ACCEPT', detected: 'MIT', reason: '', badgeContradiction: false }; },
-      scoreCandidate: () => { calls.push('score'); return { subScores: [], total: 90, rejected: false, band: 'strong', flags: [] }; },
+      scoreCandidate: () => { calls.push('score'); return { subScores: [], total: 90, rejected: false, band: 'strong', flags: [], measuredCount: 6, measuredWeightFraction: 1 }; },
       assessSovereignReadiness: () => { calls.push('sovereign'); return { verdict: 'Acceptable' }; },
       assessWhiteLabel: () => { calls.push('whiteLabel'); return { verdict: 'Ready' }; },
     };

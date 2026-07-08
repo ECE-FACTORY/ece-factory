@@ -79,11 +79,12 @@ function throwawaySpine(owner: string, name: string): GradedCandidate {
       status: 'recorded',
     },
     score: {
-      subScores: [{ dimension: 'license', score: 20, max: 20, evidence: 'MIT on allowlist', flagged: false }],
+      subScores: [{ dimension: 'license', score: 20, max: 20, evidence: 'MIT on allowlist', flagged: false, measured: true }],
       total: 78,
       rejected: false,
       band: 'acceptable',
       flags: [],
+      measuredCount: 3, measuredWeightFraction: 0.55, // type-conformance fixture; not read by the build-chain orchestrator
     },
     licenseOneLine: 'Permission is hereby granted, free of charge, to any person obtaining a copy...',
     licenseVerified: true,

@@ -35,16 +35,32 @@ export interface SubScore {
   max: number;
   evidence: string; // §3.8 — a sub-score with no evidence is not a real score
   flagged: boolean;
+  /**
+   * Was this dimension actually OBSERVED (even if the observation is bad), or is it a deny-by-default /
+   * absent / "unknown" branch? MEASURED dims count toward the normalized score's denominator; UNMEASURED
+   * dims are EXCLUDED entirely (never scored 0). Distinct from `flagged`: a measured-but-bad dimension is
+   * `flagged: true, measured: true` — a real negative finding, not an absence of evidence.
+   */
+  measured: boolean;
 }
 
 export type ScoreBand = 'strong' | 'acceptable' | 'risky' | 'reject';
 
 export interface ScoreResult {
   subScores: SubScore[];
+  /**
+   * NORMALIZED score (0–100): the weighted average over MEASURED dimensions only —
+   * Σ(points of measured dims) / Σ(max of measured dims) × 100. An unmeasured dimension is excluded from
+   * both numerator and denominator (never 0). When all six dimensions are measured, this equals the old sum.
+   */
   total: number;
   rejected: boolean; // hard reject (license 0)
   band: ScoreBand;
   flags: string[];
+  /** How many of the six dimensions were actually measured (confidence carried forward for the verdict floor). */
+  measuredCount: number;
+  /** Fraction of the total possible weight (100) that was actually measured — the score's coverage/confidence. */
+  measuredWeightFraction: number;
 }
 
 /** Adapt a Repo Intelligence record's scoringInputs (+ supplied ratings) into a ScoringCandidate. */
@@ -67,76 +83,97 @@ export function candidateFromScoringInputs(
 
 function scoreLicense(c: ScoringCandidate): SubScore {
   const d = c.license?.decision;
-  if (d === 'REJECT') return { dimension: 'license', score: 0, max: 20, evidence: `license REJECT (${c.license.detected}) — automatic rejection`, flagged: true };
-  if (d === 'ACCEPT') return { dimension: 'license', score: 20, max: 20, evidence: `license ACCEPT (${c.license.detected})`, flagged: false };
-  if (d === 'NEEDS_REVIEW') return { dimension: 'license', score: 10, max: 20, evidence: `license NEEDS_REVIEW (${c.license.detected}) — unresolved ambiguity`, flagged: true };
-  return { dimension: 'license', score: 0, max: 20, evidence: 'license evidence missing', flagged: true };
+  // A license classification (ACCEPT/REJECT/NEEDS_REVIEW) is a real observation of the LICENSE text ⇒ measured.
+  // Only a total absence of license evidence is unmeasured.
+  if (d === 'REJECT') return { dimension: 'license', score: 0, max: 20, evidence: `license REJECT (${c.license.detected}) — automatic rejection`, flagged: true, measured: true };
+  if (d === 'ACCEPT') return { dimension: 'license', score: 20, max: 20, evidence: `license ACCEPT (${c.license.detected})`, flagged: false, measured: true };
+  if (d === 'NEEDS_REVIEW') return { dimension: 'license', score: 10, max: 20, evidence: `license NEEDS_REVIEW (${c.license.detected}) — unresolved ambiguity`, flagged: true, measured: true };
+  return { dimension: 'license', score: 0, max: 20, evidence: 'license evidence missing', flagged: true, measured: false };
 }
 
 function scoreMaturity(c: ScoringCandidate): SubScore {
   const m = c.maturity;
-  if (!m) return { dimension: 'maturity', score: 0, max: 20, evidence: 'no maturity evidence (deny-by-default)', flagged: true };
-  if (m.archived === true) return { dimension: 'maturity', score: 0, max: 20, evidence: 'archived', flagged: true };
+  // Unmeasured: no maturity object at all. Measured-but-bad: archived, or actively-maintained === false (a real
+  // negative finding). Unmeasured: activelyMaintained === undefined ("not positively confirmed", deny-by-default —
+  // an ABSENCE of a maintenance finding, not a finding). A confirmed-maintained repo is measured even if stars are
+  // unknown (maintenance, the core of maturity, WAS observed).
+  if (!m) return { dimension: 'maturity', score: 0, max: 20, evidence: 'no maturity evidence (deny-by-default)', flagged: true, measured: false };
+  if (m.archived === true) return { dimension: 'maturity', score: 0, max: 20, evidence: 'archived', flagged: true, measured: true };
   if (m.activelyMaintained !== true) {
     const score = m.activelyMaintained === false ? 5 : 8;
-    return { dimension: 'maturity', score, max: 20, evidence: m.activelyMaintained === false ? 'not actively maintained' : 'active maintenance not positively confirmed (deny-by-default)', flagged: true };
+    return { dimension: 'maturity', score, max: 20, evidence: m.activelyMaintained === false ? 'not actively maintained' : 'active maintenance not positively confirmed (deny-by-default)', flagged: true, measured: m.activelyMaintained === false };
   }
-  // actively maintained
-  if (m.stars === undefined) return { dimension: 'maturity', score: 12, max: 20, evidence: 'actively maintained; deployment/star scale unverified', flagged: true };
-  if (m.stars >= 1000) return { dimension: 'maturity', score: 18, max: 20, evidence: `actively maintained; ${m.stars}★`, flagged: false };
-  if (m.stars >= 100) return { dimension: 'maturity', score: 16, max: 20, evidence: `actively maintained; ${m.stars}★`, flagged: false };
-  return { dimension: 'maturity', score: 13, max: 20, evidence: `actively maintained; only ${m.stars}★`, flagged: false };
+  // actively maintained (confirmed) — measured even when the star scale is unverified.
+  if (m.stars === undefined) return { dimension: 'maturity', score: 12, max: 20, evidence: 'actively maintained; deployment/star scale unverified', flagged: true, measured: true };
+  if (m.stars >= 1000) return { dimension: 'maturity', score: 18, max: 20, evidence: `actively maintained; ${m.stars}★`, flagged: false, measured: true };
+  if (m.stars >= 100) return { dimension: 'maturity', score: 16, max: 20, evidence: `actively maintained; ${m.stars}★`, flagged: false, measured: true };
+  return { dimension: 'maturity', score: 13, max: 20, evidence: `actively maintained; only ${m.stars}★`, flagged: false, measured: true };
 }
 
 function scoreAirGap(c: ScoringCandidate): SubScore {
+  // yes/partial/no are real observations (incl. the bounded 'partial') ⇒ measured. Only 'unknown'/absent is not.
   switch (c.airGap) {
-    case 'yes': return { dimension: 'air-gap', score: 20, max: 20, evidence: 'fully offline / air-gap deployable', flagged: false };
-    case 'partial': return { dimension: 'air-gap', score: 12, max: 20, evidence: 'partial air-gap (some removable deps)', flagged: false };
-    case 'no': return { dimension: 'air-gap', score: 4, max: 20, evidence: 'not air-gap deployable', flagged: true };
-    default: return { dimension: 'air-gap', score: 0, max: 20, evidence: 'air-gap suitability unknown (deny-by-default)', flagged: true };
+    case 'yes': return { dimension: 'air-gap', score: 20, max: 20, evidence: 'fully offline / air-gap deployable', flagged: false, measured: true };
+    case 'partial': return { dimension: 'air-gap', score: 12, max: 20, evidence: 'partial air-gap (some removable deps)', flagged: false, measured: true };
+    case 'no': return { dimension: 'air-gap', score: 4, max: 20, evidence: 'not air-gap deployable', flagged: true, measured: true };
+    default: return { dimension: 'air-gap', score: 0, max: 20, evidence: 'air-gap suitability unknown (deny-by-default)', flagged: true, measured: false };
   }
 }
 
 function scoreWhiteLabel(c: ScoringCandidate): SubScore {
+  // easy/moderate/hard are real observations ⇒ measured. Only 'unknown'/absent is not.
   switch (c.whiteLabel) {
-    case 'easy': return { dimension: 'white-label', score: 15, max: 15, evidence: 'easy rebrand, no hardcoded vendor identity', flagged: false };
-    case 'moderate': return { dimension: 'white-label', score: 10, max: 15, evidence: 'moderate branding/telemetry cleanup', flagged: false };
-    case 'hard': return { dimension: 'white-label', score: 5, max: 15, evidence: 'significant white-label friction', flagged: true };
-    default: return { dimension: 'white-label', score: 0, max: 15, evidence: 'white-label fit unknown (deny-by-default)', flagged: true };
+    case 'easy': return { dimension: 'white-label', score: 15, max: 15, evidence: 'easy rebrand, no hardcoded vendor identity', flagged: false, measured: true };
+    case 'moderate': return { dimension: 'white-label', score: 10, max: 15, evidence: 'moderate branding/telemetry cleanup', flagged: false, measured: true };
+    case 'hard': return { dimension: 'white-label', score: 5, max: 15, evidence: 'significant white-label friction', flagged: true, measured: true };
+    default: return { dimension: 'white-label', score: 0, max: 15, evidence: 'white-label fit unknown (deny-by-default)', flagged: true, measured: false };
   }
 }
 
 function scoreArchFit(c: ScoringCandidate): SubScore {
-  if (!c.archFit) return { dimension: 'arch-fit', score: 0, max: 15, evidence: 'no architecture-fit evidence (deny-by-default)', flagged: true };
+  // A supplied rating (incl. a bounded/partial 'possible') is a real observation ⇒ measured. No rating ⇒ not.
+  if (!c.archFit) return { dimension: 'arch-fit', score: 0, max: 15, evidence: 'no architecture-fit evidence (deny-by-default)', flagged: true, measured: false };
   const note = c.archFit.note ? ` — ${c.archFit.note}` : '';
   switch (c.archFit.rating) {
-    case 'strong': return { dimension: 'arch-fit', score: 15, max: 15, evidence: `strong fit${note}`, flagged: false };
-    case 'good': return { dimension: 'arch-fit', score: 11, max: 15, evidence: `good fit, integration work${note}`, flagged: false };
-    case 'possible': return { dimension: 'arch-fit', score: 6, max: 15, evidence: `possible but complex${note}`, flagged: true };
-    case 'poor': return { dimension: 'arch-fit', score: 0, max: 15, evidence: `poor/incompatible${note}`, flagged: true };
+    case 'strong': return { dimension: 'arch-fit', score: 15, max: 15, evidence: `strong fit${note}`, flagged: false, measured: true };
+    case 'good': return { dimension: 'arch-fit', score: 11, max: 15, evidence: `good fit, integration work${note}`, flagged: false, measured: true };
+    case 'possible': return { dimension: 'arch-fit', score: 6, max: 15, evidence: `possible but complex${note}`, flagged: true, measured: true };
+    case 'poor': return { dimension: 'arch-fit', score: 0, max: 15, evidence: `poor/incompatible${note}`, flagged: true, measured: true };
   }
 }
 
 function scoreMaintainability(c: ScoringCandidate): SubScore {
-  if (!c.maintainability) return { dimension: 'maintainability', score: 0, max: 10, evidence: 'no maintainability evidence (deny-by-default)', flagged: true };
+  // A supplied rating is a real observation ⇒ measured. No rating ⇒ not.
+  if (!c.maintainability) return { dimension: 'maintainability', score: 0, max: 10, evidence: 'no maintainability evidence (deny-by-default)', flagged: true, measured: false };
   const note = c.maintainability.note ? ` — ${c.maintainability.note}` : '';
   switch (c.maintainability.rating) {
-    case 'clean': return { dimension: 'maintainability', score: 10, max: 10, evidence: `clean, understandable, active${note}`, flagged: false };
-    case 'maintainable': return { dimension: 'maintainability', score: 7, max: 10, evidence: `maintainable with cleanup${note}`, flagged: false };
-    case 'hard': return { dimension: 'maintainability', score: 4, max: 10, evidence: `hard but usable${note}`, flagged: true };
-    case 'unsafe': return { dimension: 'maintainability', score: 0, max: 10, evidence: `unsafe maintenance burden${note}`, flagged: true };
+    case 'clean': return { dimension: 'maintainability', score: 10, max: 10, evidence: `clean, understandable, active${note}`, flagged: false, measured: true };
+    case 'maintainable': return { dimension: 'maintainability', score: 7, max: 10, evidence: `maintainable with cleanup${note}`, flagged: false, measured: true };
+    case 'hard': return { dimension: 'maintainability', score: 4, max: 10, evidence: `hard but usable${note}`, flagged: true, measured: true };
+    case 'unsafe': return { dimension: 'maintainability', score: 0, max: 10, evidence: `unsafe maintenance burden${note}`, flagged: true, measured: true };
   }
 }
 
 export function scoreCandidate(c: ScoringCandidate): ScoreResult {
   const subScores = [scoreLicense(c), scoreMaturity(c), scoreAirGap(c), scoreWhiteLabel(c), scoreArchFit(c), scoreMaintainability(c)];
-  const total = subScores.reduce((s, x) => s + x.score, 0);
+
+  // NORMALIZE over MEASURED dimensions only. An UNMEASURED dimension ("couldn't measure") is EXCLUDED from both
+  // numerator and denominator — it is NEVER scored 0 (which would be arithmetically identical to "measured as
+  // terrible"). This corrects the category error that capped strong-but-partially-measured repos far below FORK.
+  // Property: when all six dimensions are measured, the denominator is 100 and this equals the old plain sum.
+  const measured = subScores.filter((s) => s.measured);
+  const measuredWeight = measured.reduce((w, s) => w + s.max, 0);
+  const measuredPoints = measured.reduce((p, s) => p + s.score, 0);
+  const total = measuredWeight > 0 ? Math.round((measuredPoints / measuredWeight) * 1000) / 10 : 0; // normalized %, 1 dp
+  const measuredCount = measured.length;
+  const measuredWeightFraction = measuredWeight / 100; // total possible weight across all six dimensions is 100
+
   const license = subScores[0]!;
   const maturity = subScores[1]!;
   const airGap = subScores[2]!;
   const flags: string[] = [];
 
-  // Hard gate — License 0 ⇒ automatic rejection (cannot be outweighed).
+  // Hard gate — License 0 ⇒ automatic rejection (cannot be outweighed). UNCHANGED.
   const rejected = license.score === 0 && c.license?.decision === 'REJECT';
 
   // Hard gate — spine must score ≥15 maturity.
@@ -145,11 +182,19 @@ export function scoreCandidate(c: ScoringCandidate): ScoreResult {
   // Hard gate — air-gap below 10 ⇒ human-approval flag (sovereign requirement).
   if (airGap.score < 10) flags.push(`air-gap ${airGap.score}/20 (< 10) — human approval required (sovereign requirement)`);
 
-  // §3.9 — a 70+ candidate steered to BUILD is flagged (don't rationalize unnecessary BUILD).
-  if (!rejected && total >= 70 && c.proposedVerdict === 'BUILD') {
-    flags.push(`§3.9: candidate scores ${total}/100 (70+) yet verdict is BUILD — requires a proven blocking issue + human review (reuse beats rebuild)`);
+  // §3.9 — a 70+ candidate steered to BUILD is flagged, BUT ONLY when the normalized score is backed by real
+  // confidence: ≥3 measured dimensions (the promotion floor). §3.9 protects REUSE (FORK *or* EXTEND); an EXTEND
+  // does not require air-gap, so the reuse floor here is measuredCount ≥ 3 (not air-gap-specific). A high
+  // normalized score drawn from too few dimensions (e.g. license + maturity only) cannot substantiate the
+  // "reuse beats rebuild" objection to a BUILD.
+  const confidentForReuse = measuredCount >= 3;
+  if (!rejected && total >= 70 && confidentForReuse && c.proposedVerdict === 'BUILD') {
+    flags.push(`§3.9: candidate scores ${total}/100 (70+, ${measuredCount}/6 dims measured) yet verdict is BUILD — requires a proven blocking issue + human review (reuse beats rebuild)`);
   }
 
+  // Band = pure normalized-score classification (thresholds unchanged, now read as true percentages). The
+  // CONFIDENCE FLOOR that blocks FORK/EXTEND when too few dims are measured lives at the verdict layer
+  // (harvest-orchestrator.ts:decideSourcing), so the band stays an honest statement of the measured score.
   let band: ScoreBand;
   if (rejected) band = 'reject';
   else if (total >= 85) band = 'strong';
@@ -157,5 +202,5 @@ export function scoreCandidate(c: ScoringCandidate): ScoreResult {
   else if (total >= 55) band = 'risky';
   else band = 'reject';
 
-  return { subScores, total, rejected, band, flags };
+  return { subScores, total, rejected, band, flags, measuredCount, measuredWeightFraction };
 }
