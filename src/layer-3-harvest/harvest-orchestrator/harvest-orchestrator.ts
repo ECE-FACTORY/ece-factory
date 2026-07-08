@@ -166,9 +166,33 @@ export function decomposeLegalContractOps(): SubDomain[] {
   ];
 }
 
-/** Decompose a domain. Only the mission's domain is implemented; anything else returns []. */
+export function decomposeHrPayroll(): SubDomain[] {
+  return [
+    { key: 'core-hris', title: 'Core HRIS & Employee Records', query: 'human resources information system hris employee' },
+    { key: 'payroll', title: 'Payroll Processing', query: 'payroll processing open source' },
+    { key: 'time-attendance-leave', title: 'Time, Attendance & Leave', query: 'time attendance leave management' },
+    { key: 'recruitment-ats', title: 'Recruitment & Applicant Tracking (ATS)', query: 'applicant tracking system recruitment ats' },
+    { key: 'onboarding-performance', title: 'Onboarding & Performance', query: 'employee onboarding performance management' },
+  ];
+}
+
+export function decomposeIam(): SubDomain[] {
+  return [
+    { key: 'authentication-sso', title: 'Authentication & SSO (OIDC/SAML)', query: 'openid connect saml single sign-on identity provider' },
+    { key: 'authorization-policy', title: 'Authorization & Policy (RBAC/ABAC)', query: 'authorization rbac abac policy engine access control' },
+    { key: 'identity-user-management', title: 'Identity & User Management', query: 'identity management user directory self-service open source' },
+    { key: 'oauth-token-services', title: 'OAuth2 / OIDC Token Services', query: 'oauth2 oidc token server authorization server' },
+    { key: 'mfa-federation', title: 'MFA & Identity Federation', query: 'multi-factor authentication identity federation open source' },
+  ];
+}
+
+/** Decompose a domain into inert sub-domain search queries (domain knowledge, NOT fetched data). Only the
+ *  domains the mission has authored are implemented; anything else returns [] (fail-closed decomposition). */
 export function decompose(domain: string): SubDomain[] {
-  return /legal\s*&?\s*contract/i.test(domain) ? decomposeLegalContractOps() : [];
+  if (/legal\s*&?\s*contract/i.test(domain)) return decomposeLegalContractOps();
+  if (/hr\s*&?\s*payroll|human\s*resources|payroll/i.test(domain)) return decomposeHrPayroll();
+  if (/identity\s*&?\s*access|\biam\b/i.test(domain)) return decomposeIam();
+  return [];
 }
 
 // ── Stage 6 (pure, independently testable): the reviewer's re-derivation ───────────────────────────────
@@ -287,6 +311,53 @@ function buildDimensionTrace(base: ScoreResult, enriched: ScoreResult, signals: 
     row('air-gap', 'air-gap', signals.airGap),
     row('white-label', 'white-label', signals.whiteLabel),
   ];
+}
+
+// ── Stage 5 (pure): domain-specific narrative (moat spine list + market position) ──────────────────────
+
+/** The ONLY domain-specific narrative in the report. Everything else (sections 1–3, red-team, limitations)
+ *  is data-driven or method-driven and is domain-agnostic. Defaults to the Legal wording (byte-identical to
+ *  the original) so the Legal report regenerates unchanged; adds HR & Payroll; otherwise a neutral fallback. */
+export function domainNarrative(domain: string): { moat: string[]; marketPosition: string[] } {
+  const sharedMoatTail = [
+    'ECE BUILDS (the moat): the unified data model + integration glue across the sub-domains; sovereign/air-gap hardening; Arabic-first adaptation; the white-label brand layer; and any genuinely missing capability confirmed absent after assessment.',
+    'The deeper assessment engines the scout does NOT yet provide (air-gap prober, white-label friction analyzer, architecture-fit + maintainability review) are themselves ECE-built factory capability.',
+  ];
+  if (/hr\s*&?\s*payroll|human\s*resources|payroll/i.test(domain)) {
+    return {
+      moat: [
+        'REUSE (harvest): permissively-licensed spines per sub-domain (core HRIS/employee records, payroll processing, time & attendance/leave, recruitment/ATS, onboarding & performance) — do not rebuild what a proven repo does.',
+        ...sharedMoatTail,
+      ],
+      marketPosition: [
+        'Incumbents are proprietary SaaS HR/payroll suites (foreign-cloud, subscription, non-sovereign) alongside copyleft self-hosted stacks (GPL/AGPL) whose licenses block white-label resale.',
+        'The sovereign/air-gap + Arabic-first composition — including Arabic-language payroll and local labor-law/end-of-service localization under a white-label brand — is the differentiator nothing local offers off-the-shelf.',
+      ],
+    };
+  }
+  if (/identity\s*&?\s*access|\biam\b/i.test(domain)) {
+    return {
+      moat: [
+        'REUSE (harvest): permissively-licensed spines per sub-domain (authentication/SSO, authorization/policy, identity & user management, OAuth2/OIDC token services, MFA & federation) — proven IAM cores (e.g. Keycloak, Ory, Casbin, Casdoor, all Apache-2.0) do not get rebuilt.',
+        ...sharedMoatTail,
+      ],
+      marketPosition: [
+        'Incumbents are proprietary cloud identity providers (foreign-cloud, subscription, non-sovereign) whose trust anchor and user directory live outside the jurisdiction.',
+        'The sovereign/air-gap + Arabic-first composition — a fully self-hosted trust anchor and directory, Arabic-first admin/consent UX, under a white-label brand — is the differentiator nothing local offers off-the-shelf.',
+      ],
+    };
+  }
+  // Default: Legal & Contract Operations (and any other domain) — original wording preserved verbatim.
+  return {
+    moat: [
+      'REUSE (harvest): permissively-licensed spines per sub-domain (CLM, e-sign, clause libraries, document assembly, obligation tracking) — do not rebuild what a proven repo does.',
+      ...sharedMoatTail,
+    ],
+    marketPosition: [
+      'Incumbents are proprietary SaaS CLM suites (foreign-cloud, subscription, non-sovereign).',
+      'The sovereign/air-gap + Arabic-first white-label composition is the differentiator nothing local offers off-the-shelf.',
+    ],
+  };
 }
 
 // ── Stage 4 (pure): decision from the real (possibly enriched) score ───────────────────────────────────
@@ -474,6 +545,7 @@ export class HarvestOrchestrator {
       });
     }
 
+    const narrative = domainNarrative(domain);
     return {
       domain,
       generatedAtIso: new Date(this.now()).toISOString(),
@@ -489,15 +561,8 @@ export class HarvestOrchestrator {
         'Signal enrichment is CONFIDENCE-GATED: only MEASURED maintainability/architecture may raise a band at full weight; a PARTIAL architecture is bounded to "possible" (≤6/15); air-gap + white-label NEVER lift a band. An unreadable manifest/tree or a wrong default branch degrades a candidate to deny-by-default — it can only lose enrichment points, never gain fabricated ones.',
         'Because air-gap + white-label stay deny-by-default, enrichment can sharpen a candidate to EXTEND ("risky", ≥55) at most — it can NEVER produce a FORK. Reading a FORK from signals alone would be impossible by construction; a FORK still requires human air-gap + white-label assessment.',
       ],
-      moat: [
-        'REUSE (harvest): permissively-licensed spines per sub-domain (CLM, e-sign, clause libraries, document assembly, obligation tracking) — do not rebuild what a proven repo does.',
-        'ECE BUILDS (the moat): the unified data model + integration glue across the sub-domains; sovereign/air-gap hardening; Arabic-first adaptation; the white-label brand layer; and any genuinely missing capability confirmed absent after assessment.',
-        'The deeper assessment engines the scout does NOT yet provide (air-gap prober, white-label friction analyzer, architecture-fit + maintainability review) are themselves ECE-built factory capability.',
-      ],
-      marketPosition: [
-        'Incumbents are proprietary SaaS CLM suites (foreign-cloud, subscription, non-sovereign).',
-        'The sovereign/air-gap + Arabic-first white-label composition is the differentiator nothing local offers off-the-shelf.',
-      ],
+      moat: narrative.moat,
+      marketPosition: narrative.marketPosition,
       limitations: [
         'End-to-end scores reflect license + maturity, plus (where a signals scout ran) MEASURED maintainability/architecture. Air-gap + white-label remain deny-by-default (0) — machine-unassessable — so every decision is provisional until a human assesses them; enrichment can lift a candidate to EXTEND at most, never FORK.',
         'Where signals were gathered, each candidate row shows the confidence-gated per-dimension deltas; a band that moved is attributed in the decision evidence to the exact measured/bounded signals that justified it. A candidate with no signals (or fail-closed) is graded exactly as a license+maturity-only pass.',
