@@ -199,6 +199,40 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     }
   });
 
+  // ── Prohibition 4e (extended additively) — the Layer-5 FILESYSTEM governed-adapter obeys the same boundary ─
+  // filesystem-adapter-dryrun is the SECOND implementation of the governed-adapter CONTRACT. It must obey the
+  // same write boundary as the GitHub adapter: the write-capable call requires the branded ConsumedApproval, it
+  // mints NO token, and — being a filesystem writer — it must import NO node:fs and hold NO real fs-write call
+  // (writeFile/mkdir/rm/cp/rename/appendFile). It depends on the CONTRACT, not the transport. This block is
+  // purely ADDITIVE: it adds coverage for a new adapter and changes NONE of the assertions above.
+  it('Prohibition 4e (filesystem) — the Layer-5 filesystem governed-adapter requires ConsumedApproval, mints nothing, imports no node:fs, and has no real fs-write call', () => {
+    const fsImplRaw = readFileSync(
+      join(SRC, 'layer-5-action', 'filesystem-adapter-dryrun', 'filesystem-adapter-dryrun.ts'), 'utf8');
+    const fsImpl = stripComments(fsImplRaw);
+
+    // The write-capable call is type-gated by the REAL branded token; it depends on the CONTRACT, not the transport.
+    expect(/shapePlan\s*\([^)]*approval:\s*ConsumedApproval[^)]*\)/s.test(fsImplRaw)).toBe(true);
+    expect(/from\s*['"]\.\.\/governed-adapter\/governed-adapter\.js['"]/.test(fsImplRaw)).toBe(true);
+    expect(/from\s*['"]\.\.\/mcp-bridge\//.test(fsImplRaw)).toBe(false);
+
+    // Mints nothing.
+    expect(/\bmintConsumedApproval\b/.test(fsImpl)).toBe(false);
+    expect(/\bmintExternalCapability\b/.test(fsImpl)).toBe(false);
+
+    // Imports NO node:fs at all — a filesystem adapter that cannot touch the filesystem.
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(fsImpl)).toBe(false);
+    expect(/from\s*['"]fs(\/promises)?['"]/.test(fsImpl)).toBe(false);
+    expect(/require\(\s*['"](node:)?fs(\/promises)?['"]\s*\)/.test(fsImpl)).toBe(false);
+
+    // NO real filesystem-write call exists — inert planned data only (dryRun/plannedOnly).
+    for (const re of [/\bwriteFile\s*\(/, /\bmkdir\s*\(/, /\brm\s*\(/, /\brmdir\s*\(/, /\bcp\s*\(/,
+                      /\brename\s*\(/, /\bappendFile\s*\(/, /\bunlink\s*\(/, /\bcreateWriteStream\s*\(/, /\bcopyFile\s*\(/]) {
+      expect({ pattern: String(re), hit: re.test(fsImpl) }).toEqual({ pattern: String(re), hit: false });
+    }
+    // And still no mutating execute() path.
+    expect(/\bexecute\s*\(/.test(fsImpl)).toBe(false);
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven
