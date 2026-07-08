@@ -58,6 +58,31 @@ export function canonicalPayload(payload: unknown): string {
   return JSON.stringify(payload ?? null);
 }
 
+// ── The reusable INTENT-BINDING fingerprint (transport-agnostic) ─────────────────────────────────────
+// Lives HERE, at the bridge, because this is the layer that owns ApprovalBinding AND mints the token — so the
+// fingerprint stamped INTO a ConsumedApproval and the fingerprint a governed plan records are, by construction,
+// the SAME function of the SAME binding. The governed-adapter contract re-exports these (no divergence possible).
+/** Canonical string form of the exact action an approval is bound to: (tool, target, payload). */
+export function canonicalBinding(b: ApprovalBinding): string {
+  return JSON.stringify([b.tool, b.target ?? '', b.payloadJson ?? canonicalPayload(undefined)]);
+}
+/**
+ * A stable, dependency-free fingerprint (FNV-1a/32) of the bound intent. Unlike the ApprovalGate's `approvalId`
+ * (a PER-GATE-INSTANCE counter that can collide across gates — apr_1 from gate A equals apr_1 from gate B), this
+ * fingerprint is derived from the intent CONTENT (tool, target, payload), so an approval for intent A can never
+ * pass as bound to a different intent B. This is the value stamped into a ConsumedApproval at mint and recorded
+ * on the governed plan, so an executor can prove an approval is bound to the EXACT plan it is executing.
+ */
+export function boundIntentHash(b: ApprovalBinding): string {
+  const s = canonicalBinding(b);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
 /**
  * Bridge-layer adapter over the Wave-2 Approval Gate (engine untouched). Adds the three write-tier
  * guarantees the dispatcher needs: SINGLE-USE (a consumed action cannot be replayed), PER-ACTION BINDING
@@ -100,10 +125,16 @@ const APPROVAL_BRAND: unique symbol = Symbol('consumedApproval');
 export interface ConsumedApproval {
   readonly approvalId: string;
   readonly tool: string;
+  /**
+   * Content-derived fingerprint of the EXACT (tool, target, payload) binding this token was consumed for. This is
+   * the token's non-transferable binding: unlike `approvalId` (a per-gate counter that collides across gates), it
+   * lets a downstream executor prove the approval is bound to the specific plan it is about to execute.
+   */
+  readonly boundIntentHash: string;
   readonly [APPROVAL_BRAND]: true;
 }
-function mintConsumedApproval(approvalId: string, tool: string): ConsumedApproval {
-  return { approvalId, tool, [APPROVAL_BRAND]: true };
+function mintConsumedApproval(approvalId: string, tool: string, boundIntentHash: string): ConsumedApproval {
+  return { approvalId, tool, boundIntentHash, [APPROVAL_BRAND]: true };
 }
 
 // ── Per-class handlers and outcomes ──────────────────────────────────────────────────────────────────
@@ -175,7 +206,9 @@ export class ClassDispatcher {
     const binding = ctx.approvalBinding ?? { tool: ctx.tool ?? '' };
     const c = this.approval.consumeApproval(ctx.approvalActionId, binding); // single-use + per-action (adapter)
     if (!c) return null;
-    return mintConsumedApproval(c.approvalId, binding.tool);
+    // Stamp the CONTENT-derived binding fingerprint into the token, from the SAME binding the gate matched. A
+    // downstream executor compares this to the plan's boundIntentHash so an approval is non-transferable between plans.
+    return mintConsumedApproval(c.approvalId, binding.tool, boundIntentHash(binding));
   }
 }
 

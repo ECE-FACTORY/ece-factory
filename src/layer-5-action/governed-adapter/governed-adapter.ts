@@ -27,13 +27,18 @@ import {
   BridgeApprovalGate,
   ClassDispatcher,
   canonicalPayload,
+  canonicalBinding,
+  boundIntentHash,
   type ConsumedApproval,
   type ApprovalGateReader,
   type ApprovalBinding,
 } from '../mcp-bridge/tool-classes.js';
 
-// Re-export the real gate types so concrete adapters depend on THIS contract, not on the transport module.
-export { canonicalPayload };
+// Re-export the real gate types so concrete adapters depend on THIS contract, not on the transport module. The
+// intent-binding fingerprint (canonicalBinding/boundIntentHash) is DEFINED at the bridge — the same layer that
+// mints the ConsumedApproval — so the token's stamped hash and the plan's recorded hash are the same function of
+// the same binding, and cannot silently diverge. We re-export it here so adapters keep depending on the contract.
+export { canonicalPayload, canonicalBinding, boundIntentHash };
 export type { ConsumedApproval, ApprovalGateReader, ApprovalBinding };
 
 /**
@@ -61,25 +66,10 @@ export const PLANNED_ONLY_NOTE =
   'later, human-approved build.';
 
 // ── The reusable INTENT-BINDING primitive (GitHub-agnostic) ─────────────────────────────────────────────
-/** Canonical string form of the exact action an approval is bound to: (tool, target, payload). */
-export function canonicalBinding(b: ApprovalBinding): string {
-  return JSON.stringify([b.tool, b.target ?? '', b.payloadJson ?? canonicalPayload(undefined)]);
-}
-/**
- * A stable, dependency-free fingerprint (FNV-1a/32) of the bound intent. This is the reusable primitive: the
- * approval is bound to THIS intent. ENFORCEMENT of the binding is the ApprovalGate's per-action check
- * (tool-classes.ts:88-90) at consume time; this hash is the provable fingerprint we record in the audit and
- * surface in the plan, so a human can confirm the plan matches exactly what was approved.
- */
-export function boundIntentHash(b: ApprovalBinding): string {
-  const s = canonicalBinding(b);
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
+// `canonicalBinding` / `boundIntentHash` now live at the bridge (tool-classes.ts) — the layer that also mints the
+// ConsumedApproval — and are re-exported above so this contract's surface is unchanged. ENFORCEMENT of the binding
+// is BOTH the ApprovalGate's per-action check (tool-classes.ts:88-90) at consume time AND the fingerprint stamped
+// into the token, which the sole executor compares against the plan's recorded hash before any real write.
 
 // ── Write-ahead audit seam (the real Audit Engine attaches here at composition) ─────────────────────────
 // A minimal, DB-free subset of the Audit Engine's AuditSink (factory-shared/audit-engine/sink.ts): append an
