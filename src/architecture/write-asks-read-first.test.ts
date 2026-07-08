@@ -275,6 +275,60 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     expect(/approval:\s*ConsumedApproval\b/.test(plannerRaw)).toBe(true);
   });
 
+  // ── Prohibition 4g (added additively) — the SOLE real filesystem writer is gated + jailed ─────────────
+  // filesystem-executor.ts is the FIRST and ONLY module in the factory that legitimately performs a real fs
+  // write. 4e/4f (unchanged above) still prove the dry-run adapter, the github adapter, and the build planner
+  // are INCAPABLE (no node:fs, no real-write call, no mint). This block does NOT loosen them — it proves the
+  // NEW carve-out is fenced: the executor imports node:fs (the one sanctioned place) yet is (1) approval-gated
+  // by the REAL branded ConsumedApproval, (2) MINTS NOTHING, (3) references the hard-coded /tmp/ece-dryrun- jail
+  // constant, and (4) performs NO destructive op (no rm/unlink/rename/rmdir — creates only) AND fences the real
+  // write at the SYSCALL boundary: a NEW file is created via openSync with O_EXCL (fails rather than overwrites)
+  // AND O_NOFOLLOW (the kernel refuses a final-component symlink, closing the final-component TOCTOU) — never
+  // writeFileSync. The net effect: the law now proves the ONLY real writer is gated + jailed. Purely ADDITIVE.
+  it('Prohibition 4g — the filesystem-executor is the SOLE sanctioned writer AND is approval-gated, jailed, mints nothing, and does no destructive op', () => {
+    const execRaw = readFileSync(
+      join(SRC, 'layer-5-action', 'filesystem-executor', 'filesystem-executor.ts'), 'utf8');
+    const exec = stripComments(execRaw);
+
+    // (0) It is the sanctioned writer: it DOES import node:fs (unlike 4e's adapters, which must not).
+    expect(/from\s*['"]node:fs['"]/.test(execRaw)).toBe(true);
+
+    // (1) APPROVAL-GATED — the write entry requires the REAL branded ConsumedApproval, imported as a TYPE from
+    //     the governed-adapter CONTRACT (which re-exports the module-private bridge token). No ungated write.
+    expect(/executeFilesystemPlan\s*\([\s\S]*?approval:\s*ConsumedApproval/.test(execRaw)).toBe(true);
+    expect(/from\s*['"]\.\.\/governed-adapter\/governed-adapter\.js['"]/.test(execRaw)).toBe(true);
+
+    // (2) MINTS NOTHING — no token/capability mint of any kind.
+    expect(/\bmintConsumedApproval\b/.test(exec)).toBe(false);
+    expect(/\bmintExternalCapability\b/.test(exec)).toBe(false);
+    expect(/\bmint[A-Za-z]*\s*\(/.test(exec)).toBe(false);
+
+    // (3) JAILED — the hard-coded, non-parameter /tmp/ece-dryrun- jail constant is present.
+    expect(/const JAIL_PREFIX\s*=\s*['"]\/tmp\/ece-dryrun-['"]/.test(exec)).toBe(true);
+
+    // (4) NO DESTRUCTIVE OP — creates only (mkdir/fd-create); never deletes/overwrites/renames. And the file
+    //     write is fenced at the syscall boundary: an explicit openSync with O_EXCL (fails rather than overwrites)
+    //     AND O_NOFOLLOW (kernel refuses a final-component symlink) — writeFileSync is never used.
+    for (const re of [/\brm\s*\(/, /\brmSync\s*\(/, /\brmdir\s*\(/, /\brmdirSync\s*\(/, /\bunlink\s*\(/,
+                      /\bunlinkSync\s*\(/, /\brename\s*\(/, /\brenameSync\s*\(/, /\btruncate\s*\(/, /\bcopyFile\s*\(/]) {
+      expect({ pattern: String(re), hit: re.test(exec) }).toEqual({ pattern: String(re), hit: false });
+    }
+    expect(/\bwriteFileSync\b/.test(exec)).toBe(false);
+    expect(/openSync\s*\(/.test(exec)).toBe(true);
+    expect(/constants\.O_EXCL\b/.test(exec)).toBe(true);
+    expect(/constants\.O_NOFOLLOW\b/.test(exec)).toBe(true);
+
+    // AND the carve-out did NOT loosen 4e: the dry-run filesystem ADAPTER still imports no node:fs and still has
+    // no real fs-write call. (Re-checked here so 4g can never silently mask a regression in the incapable adapter.)
+    const dryRunRaw = readFileSync(
+      join(SRC, 'layer-5-action', 'filesystem-adapter-dryrun', 'filesystem-adapter-dryrun.ts'), 'utf8');
+    const dryRun = stripComments(dryRunRaw);
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(dryRun)).toBe(false);
+    for (const re of [/\bwriteFile\s*\(/, /\bmkdir\s*\(/]) {
+      expect({ pattern: String(re), hit: re.test(dryRun) }).toEqual({ pattern: String(re), hit: false });
+    }
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven
