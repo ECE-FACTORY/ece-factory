@@ -52,6 +52,19 @@ export interface ApprovedBuildDecision {
   readonly approvedBy: string;
   /** Provenance of the harvest report this decision came from. */
   readonly sourceReport: { readonly domain: string; readonly generatedAtIso: string };
+  /**
+   * OPTIONAL, ADDITIVE (Phase: deciding→building seam). The human's MEASURED air-gap assessment that promoted
+   * this spine EXTEND→FORK — the one sovereign dimension the harvest machine never measures. Populated by the
+   * Layer-2 build-decision-seam; the planner does not read it (Layer 4 still consumes the decision verbatim).
+   * `gateActionId` is the REAL approved Approval-Gate action id the promotion was consumed against — never a
+   * placeholder. `value` is a measurement, so 'yes' | 'partial' | 'no' (never 'unknown').
+   */
+  readonly airGapAssessment?: {
+    readonly value: 'yes' | 'partial' | 'no';
+    readonly rationale: string;
+    readonly measuredBy: string;
+    readonly gateActionId: string;
+  };
 }
 
 /** How faithful a section of the plan is: a real plan we can act on, or a placeholder for a later slice. */

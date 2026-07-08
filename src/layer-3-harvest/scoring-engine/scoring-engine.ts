@@ -110,14 +110,23 @@ function scoreMaturity(c: ScoringCandidate): SubScore {
   return { dimension: 'maturity', score: 13, max: 20, evidence: `actively maintained; only ${m.stars}★`, flagged: false, measured: true };
 }
 
-function scoreAirGap(c: ScoringCandidate): SubScore {
-  // yes/partial/no are real observations (incl. the bounded 'partial') ⇒ measured. Only 'unknown'/absent is not.
-  switch (c.airGap) {
+/**
+ * The air-gap dimension's fixed Layer-1.1 scale, as a standalone mapping. yes/partial/no are real observations
+ * (incl. the bounded 'partial') ⇒ measured; only 'unknown'/absent is deny-by-default unmeasured. Exported so a
+ * HUMAN-measured air-gap rating can be folded into an existing score through the SAME scale the engine uses
+ * (no duplicate scoring math elsewhere) — see `foldAirGapMeasurement`.
+ */
+export function airGapSubScore(value: AirGapSuitability | undefined): SubScore {
+  switch (value) {
     case 'yes': return { dimension: 'air-gap', score: 20, max: 20, evidence: 'fully offline / air-gap deployable', flagged: false, measured: true };
     case 'partial': return { dimension: 'air-gap', score: 12, max: 20, evidence: 'partial air-gap (some removable deps)', flagged: false, measured: true };
     case 'no': return { dimension: 'air-gap', score: 4, max: 20, evidence: 'not air-gap deployable', flagged: true, measured: true };
     default: return { dimension: 'air-gap', score: 0, max: 20, evidence: 'air-gap suitability unknown (deny-by-default)', flagged: true, measured: false };
   }
+}
+
+function scoreAirGap(c: ScoringCandidate): SubScore {
+  return airGapSubScore(c.airGap);
 }
 
 function scoreWhiteLabel(c: ScoringCandidate): SubScore {
@@ -154,19 +163,35 @@ function scoreMaintainability(c: ScoringCandidate): SubScore {
   }
 }
 
-export function scoreCandidate(c: ScoringCandidate): ScoreResult {
-  const subScores = [scoreLicense(c), scoreMaturity(c), scoreAirGap(c), scoreWhiteLabel(c), scoreArchFit(c), scoreMaintainability(c)];
-
-  // NORMALIZE over MEASURED dimensions only. An UNMEASURED dimension ("couldn't measure") is EXCLUDED from both
-  // numerator and denominator — it is NEVER scored 0 (which would be arithmetically identical to "measured as
-  // terrible"). This corrects the category error that capped strong-but-partially-measured repos far below FORK.
-  // Property: when all six dimensions are measured, the denominator is 100 and this equals the old plain sum.
+/**
+ * NORMALIZE over MEASURED dimensions only. An UNMEASURED dimension ("couldn't measure") is EXCLUDED from both
+ * numerator and denominator — it is NEVER scored 0 (which would be arithmetically identical to "measured as
+ * terrible"). Property: when all six dimensions are measured, the denominator is 100 and this equals the old
+ * plain sum. Pure — the single source of the normalized aggregate, reused by `scoreCandidate` AND by
+ * `foldAirGapMeasurement`, so folding a human air-gap measurement can never drift from the engine's own math.
+ */
+export function normalizeMeasured(subScores: readonly SubScore[]): { total: number; measuredCount: number; measuredWeightFraction: number } {
   const measured = subScores.filter((s) => s.measured);
   const measuredWeight = measured.reduce((w, s) => w + s.max, 0);
   const measuredPoints = measured.reduce((p, s) => p + s.score, 0);
   const total = measuredWeight > 0 ? Math.round((measuredPoints / measuredWeight) * 1000) / 10 : 0; // normalized %, 1 dp
-  const measuredCount = measured.length;
-  const measuredWeightFraction = measuredWeight / 100; // total possible weight across all six dimensions is 100
+  return { total, measuredCount: measured.length, measuredWeightFraction: measuredWeight / 100 }; // 100 = full weight
+}
+
+/** Band = pure normalized-score classification (a hard reject overrides). The confidence FLOOR that blocks
+ *  FORK/EXTEND when too few dims are measured lives at the verdict layer (decideSourcing), not here. */
+export function bandFor(total: number, rejected: boolean): ScoreBand {
+  if (rejected) return 'reject';
+  if (total >= 85) return 'strong';
+  if (total >= 70) return 'acceptable';
+  if (total >= 55) return 'risky';
+  return 'reject';
+}
+
+export function scoreCandidate(c: ScoringCandidate): ScoreResult {
+  const subScores = [scoreLicense(c), scoreMaturity(c), scoreAirGap(c), scoreWhiteLabel(c), scoreArchFit(c), scoreMaintainability(c)];
+
+  const { total, measuredCount, measuredWeightFraction } = normalizeMeasured(subScores);
 
   const license = subScores[0]!;
   const maturity = subScores[1]!;
@@ -192,15 +217,27 @@ export function scoreCandidate(c: ScoringCandidate): ScoreResult {
     flags.push(`§3.9: candidate scores ${total}/100 (70+, ${measuredCount}/6 dims measured) yet verdict is BUILD — requires a proven blocking issue + human review (reuse beats rebuild)`);
   }
 
-  // Band = pure normalized-score classification (thresholds unchanged, now read as true percentages). The
-  // CONFIDENCE FLOOR that blocks FORK/EXTEND when too few dims are measured lives at the verdict layer
-  // (harvest-orchestrator.ts:decideSourcing), so the band stays an honest statement of the measured score.
-  let band: ScoreBand;
-  if (rejected) band = 'reject';
-  else if (total >= 85) band = 'strong';
-  else if (total >= 70) band = 'acceptable';
-  else if (total >= 55) band = 'risky';
-  else band = 'reject';
+  const band = bandFor(total, rejected);
 
   return { subScores, total, rejected, band, flags, measuredCount, measuredWeightFraction };
+}
+
+/**
+ * Fold a HUMAN-MEASURED air-gap rating into an EXISTING score WITHOUT re-grading any other dimension. Returns a
+ * NEW ScoreResult (mutates nothing): the air-gap sub-score is replaced with the measured one (via the engine's
+ * own `airGapSubScore` scale), EVERY OTHER sub-score is carried BYTE-FOR-BYTE, and total/band/measuredCount/
+ * coverage are recomputed over the now-larger measured set with the SAME `normalizeMeasured`. The air-gap<10
+ * sovereign flag is recomputed from the measured value; all other flags are preserved. This is the seam's
+ * honest mechanism for the one dimension the machine never measures: a bad air-gap (e.g. 'no' ⇒ 4/20) can drag
+ * the normalized score below the FORK floor, which is exactly what must happen. `value` excludes 'unknown' — a
+ * *measurement* is always yes/partial/no; recording "unknown" is not a measurement.
+ */
+export function foldAirGapMeasurement(score: ScoreResult, value: Exclude<AirGapSuitability, 'unknown'>): ScoreResult {
+  const measuredAirGap = airGapSubScore(value);
+  const subScores = score.subScores.map((s) => (s.dimension === 'air-gap' ? { ...measuredAirGap } : { ...s }));
+  const { total, measuredCount, measuredWeightFraction } = normalizeMeasured(subScores);
+  const band = bandFor(total, score.rejected);
+  const flags = score.flags.filter((f) => !f.startsWith('air-gap ')); // drop the stale unmeasured air-gap flag
+  if (measuredAirGap.score < 10) flags.push(`air-gap ${measuredAirGap.score}/20 (< 10) — human approval required (sovereign requirement)`);
+  return { subScores, total, rejected: score.rejected, band, flags, measuredCount, measuredWeightFraction };
 }
