@@ -233,6 +233,48 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     expect(/\bexecute\s*\(/.test(fsImpl)).toBe(false);
   });
 
+  // ── Prohibition 4f (added additively) — the Layer-4 BUILD PLANNER cannot write and cannot self-approve ─
+  // build-planner.ts turns an ALREADY-APPROVED harvest decision into an INERT BuildPlan and DELEGATES the
+  // scaffold write to the gated filesystem adapter. As a Layer-4 orchestrator that never touches a store, it
+  // must obey the write boundary from the top: it imports NO node:fs (cannot write), holds NO real fs-write
+  // call, MINTS NOTHING (cannot manufacture approval), and can only CONSUME an ApprovedBuildDecision whose
+  // `approval` is the REAL branded ConsumedApproval — imported as a TYPE from the governed-adapter CONTRACT
+  // (which re-exports the module-private bridge token), never a local approval constructor. This block is
+  // purely ADDITIVE: it adds coverage for the build planner and changes NONE of the assertions above.
+  it('Prohibition 4f — the Layer-4 build planner imports no node:fs, has no real-write call, mints nothing, and depends on the real gate approval type (not a local constructor)', () => {
+    const plannerRaw = readFileSync(
+      join(SRC, 'layer-4-build-harden', 'build-planner', 'build-planner.ts'), 'utf8');
+    const planner = stripComments(plannerRaw);
+
+    // 1. Imports NO node:fs at all — the planner returns DATA and cannot touch the filesystem.
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(planner)).toBe(false);
+    expect(/from\s*['"]fs(\/promises)?['"]/.test(planner)).toBe(false);
+    expect(/require\(\s*['"](node:)?fs(\/promises)?['"]\s*\)/.test(planner)).toBe(false);
+
+    // 2. NO real filesystem-write call exists — inert planned data only (same technique as 4e).
+    for (const re of [/\bwriteFile\s*\(/, /\bmkdir\s*\(/, /\brm\s*\(/, /\brmdir\s*\(/, /\bcp\s*\(/,
+                      /\brename\s*\(/, /\bappendFile\s*\(/, /\bunlink\s*\(/, /\bcreateWriteStream\s*\(/, /\bcopyFile\s*\(/]) {
+      expect({ pattern: String(re), hit: re.test(planner) }).toEqual({ pattern: String(re), hit: false });
+    }
+
+    // 3. MINTS NOTHING — no named mint of a token, and no `mint…(` call at all. The planner can only CONSUME
+    //    an ApprovedBuildDecision; it can never construct one.
+    expect(/\bmintConsumedApproval\b/.test(planner)).toBe(false);
+    expect(/\bmintExternalCapability\b/.test(planner)).toBe(false);
+    expect(/\bmint[A-Za-z]*\s*\(/.test(planner)).toBe(false);
+
+    // 4. Depends on the approval type from the REAL gate — ConsumedApproval imported as a TYPE from the
+    //    governed-adapter CONTRACT (build-planner.ts:29-34), which re-exports the module-private bridge token.
+    //    No local approval constructor: it uses the branded type only (the ApprovedBuildDecision.approval slot).
+    expect(/from\s*['"]\.\.\/\.\.\/layer-5-action\/governed-adapter\/governed-adapter\.js['"]/.test(plannerRaw)).toBe(true);
+    // The imported binding list from that contract includes ConsumedApproval (the real gate's token type).
+    const contractImport = /import\s+type\s*\{([^}]*)\}\s*from\s*['"]\.\.\/\.\.\/layer-5-action\/governed-adapter\/governed-adapter\.js['"]/s.exec(plannerRaw);
+    expect(contractImport).not.toBeNull();
+    expect(/\bConsumedApproval\b/.test(contractImport![1])).toBe(true);
+    // And the approval it holds is exactly that branded token — no locally-shaped approval object.
+    expect(/approval:\s*ConsumedApproval\b/.test(plannerRaw)).toBe(true);
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven
