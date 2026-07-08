@@ -167,6 +167,38 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     }
   });
 
+  // ── Prohibition 4 (extended): the Layer-5 governed-adapter write path is gated by ConsumedApproval too ─
+  // The governed-adapter CONTRACT is the first piece of the far side of the human gate; github-adapter-dryrun is
+  // its first implementation. Both must obey the same write boundary: the write-capable call requires the branded
+  // ConsumedApproval (whose mint is module-private to the bridge), NEITHER mints a token, and NEITHER holds any
+  // real-write call path (fetch/http/octokit). The impl depends on the CONTRACT, not the transport.
+  it('Prohibition 4e — the Layer-5 governed-adapter contract + github impl require ConsumedApproval, mint nothing, and have no real-write call', () => {
+    const contractSrc = readFileSync(
+      join(SRC, 'layer-5-action', 'governed-adapter', 'governed-adapter.ts'), 'utf8');
+    const implSrc = readFileSync(
+      join(SRC, 'layer-5-action', 'github-adapter-dryrun', 'github-adapter-dryrun.ts'), 'utf8');
+
+    // CONTRACT: the write-capable call is type-gated by the REAL branded token; it consumes the bridge, mints nothing.
+    expect(/shapePlan\s*\([^)]*approval:\s*ConsumedApproval[^)]*\)/s.test(contractSrc)).toBe(true);
+    expect(/from\s*['"]\.\.\/mcp-bridge\/tool-classes\.js['"]/.test(contractSrc)).toBe(true);
+    expect(/\bmintConsumedApproval\b/.test(stripComments(contractSrc))).toBe(false);
+    expect(/\bmintExternalCapability\b/.test(stripComments(contractSrc))).toBe(false);
+    // No mutating execute() and no real write call anywhere in the contract.
+    expect(/\bexecute\s*\(/.test(stripComments(contractSrc))).toBe(false);
+
+    // IMPL: shapes a GitHub plan, mints nothing, and depends on the CONTRACT — not the transport module.
+    expect(/shapePlan\s*\([^)]*approval:\s*ConsumedApproval[^)]*\)/s.test(implSrc)).toBe(true);
+    expect(/from\s*['"]\.\.\/governed-adapter\/governed-adapter\.js['"]/.test(implSrc)).toBe(true);
+    expect(/\bmintConsumedApproval\b/.test(stripComments(implSrc))).toBe(false);
+
+    // NO real write call exists in EITHER — planners return inert data (dryRun/plannedOnly), never a request.
+    for (const src of [stripComments(contractSrc), stripComments(implSrc)]) {
+      for (const re of [/\bfetch\s*\(/, /\baxios\b/, /octokit/i, /createGithubRepo\s*\(/, /openPullRequest\s*\(/]) {
+        expect({ pattern: String(re), hit: re.test(src) }).toEqual({ pattern: String(re), hit: false });
+      }
+    }
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven
