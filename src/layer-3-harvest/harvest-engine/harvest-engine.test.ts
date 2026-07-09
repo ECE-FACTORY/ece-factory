@@ -14,7 +14,7 @@ const repoEng = new RepoIntelligenceEngine({ classify: classifyLicense }, () => 
 const engines: HarvestEngines = {
   classifyLicense,
   evaluateRepo: (i) => repoEng.evaluate(i),
-  score: scoreCandidate,
+  score: (c) => scoreCandidate(c, 'sovereign'),
   assessSpine: assessProductSpine,
   assessSovereign: assessSovereignReadiness,
   assessWhiteLabel,

@@ -29,6 +29,13 @@ export interface MaturitySignals {
 }
 export type AirGapSuitability = 'yes' | 'partial' | 'no' | 'unknown';
 export type WhiteLabelFit = 'easy' | 'moderate' | 'hard' | 'unknown';
+// ── Subscription-mode dimensions (product-mode switch). Deny-by-default 'unknown' when unassessed. ──────
+/** Tenant isolation by design. HUMAN-assessed (the subscription analog of air-gap) — no dep signature certifies it. */
+export type MultiTenancy = 'full' | 'partial' | 'none' | 'unknown';
+/** Billing / subscription hooks. Machine-detectable to 'integratable' from a billing SDK; 'native' is human-confirmed. */
+export type BillingHooks = 'native' | 'integratable' | 'none' | 'unknown';
+/** Cloud-native / scalable architecture. Machine-measurable from Dockerfile/k8s/helm/cloud-SDK evidence. */
+export type CloudNative = 'strong' | 'partial' | 'poor' | 'unknown';
 export type Verdict = 'FORK' | 'EXTEND' | 'BUILD';
 export type Eligibility = 'eligible' | 'not-eligible' | 'needs-review';
 export type LicenseDecision = ComplianceResult['decision'];
@@ -42,6 +49,9 @@ export interface RepoEvaluationInput {
   maturity?: MaturitySignals;
   airGapSuitability?: AirGapSuitability;
   whiteLabelFit?: WhiteLabelFit;
+  multiTenancy?: MultiTenancy;
+  billingHooks?: BillingHooks;
+  cloudNative?: CloudNative;
   architectureFitNotes?: string;
   priorVerdict?: Verdict | null;
   readme?: string; // repo-sourced TEXT — INERT DATA
@@ -59,6 +69,10 @@ export interface RepoEvaluationRecord {
   maturity: MaturitySignals | null;
   airGapSuitability: AirGapSuitability;
   whiteLabelFit: WhiteLabelFit;
+  /** Subscription-mode dimensions — optional/additive; absent ⇒ deny-by-default 'unknown' (unmeasured). */
+  multiTenancy?: MultiTenancy;
+  billingHooks?: BillingHooks;
+  cloudNative?: CloudNative;
   architectureFitNotes: string | null;
   priorVerdict: Verdict | null;
   readme: string | null; // inert data
@@ -85,6 +99,9 @@ export interface ScoringInputs {
   maturity: MaturitySignals | null;
   airGapSuitability: AirGapSuitability;
   whiteLabelFit: WhiteLabelFit;
+  multiTenancy?: MultiTenancy;
+  billingHooks?: BillingHooks;
+  cloudNative?: CloudNative;
   architectureFitNotes: string | null;
 }
 export function scoringInputs(r: RepoEvaluationRecord): ScoringInputs {
@@ -94,6 +111,9 @@ export function scoringInputs(r: RepoEvaluationRecord): ScoringInputs {
     maturity: r.maturity,
     airGapSuitability: r.airGapSuitability,
     whiteLabelFit: r.whiteLabelFit,
+    multiTenancy: r.multiTenancy,
+    billingHooks: r.billingHooks,
+    cloudNative: r.cloudNative,
     architectureFitNotes: r.architectureFitNotes,
   };
 }
@@ -118,6 +138,10 @@ export class RepoIntelligenceEngine {
       maturity: input.maturity ?? null,
       airGapSuitability: input.airGapSuitability ?? 'unknown',
       whiteLabelFit: input.whiteLabelFit ?? 'unknown',
+      // Subscription dims: carried through when supplied; absent ⇒ undefined (toEqual-ignored, deny-by-default).
+      multiTenancy: input.multiTenancy,
+      billingHooks: input.billingHooks,
+      cloudNative: input.cloudNative,
       architectureFitNotes: input.architectureFitNotes ?? null,
       priorVerdict: input.priorVerdict ?? null,
       readme: input.readme ?? null, // stored verbatim as INERT DATA

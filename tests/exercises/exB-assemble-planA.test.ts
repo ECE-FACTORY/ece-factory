@@ -11,14 +11,14 @@ import type { ScoringCandidate } from '../../src/layer-3-harvest/scoring-engine/
 import type { GradedCandidate, HarvestReport, SubDomainResult } from '../../src/layer-3-harvest/harvest-orchestrator/harvest-orchestrator.js';
 import type { RepoEvaluationRecord } from '../../src/layer-3-harvest/repo-intelligence/repo-intelligence.js';
 import { BuildDecisionSeam } from '../../src/layer-2-command/build-decision-seam/build-decision-seam.js';
-import { buildPlanFor, type ApprovedBuildDecision, type ScaffoldGrant, type BuildPlannerInput } from '../../src/layer-4-build-harden/build-planner/build-planner.js';
+import { buildPlanFor, type ScaffoldGrant, type BuildPlannerInput } from '../../src/layer-4-build-harden/build-planner/build-planner.js';
 import { BuildChainOrchestrator } from '../../src/layer-4-build-harden/build-chain-orchestrator/build-chain-orchestrator.js';
 import type { ScopedCredentialRef, GovernedAuditRecorder } from '../../src/layer-5-action/governed-adapter/governed-adapter.js';
 
 const log = (...a: unknown[]) => console.log(...a); // eslint-disable-line no-console
 
 function reconstruct(scoring: ScoringCandidate, owner: string, name: string, expectTotal: number): GradedCandidate {
-  const score = scoreCandidate(scoring);
+  const score = scoreCandidate(scoring, 'sovereign');
   expect(score.total, `reconstruction of ${owner}/${name} must match the report`).toBe(expectTotal);
   const identity = { host: 'github.com', owner, name };
   const record: RepoEvaluationRecord = {
@@ -44,7 +44,7 @@ function iamReport(spine: GradedCandidate): HarvestReport {
     candidates: [spine], spine, decision: 'EXTEND', decisionEvidence: ['harvest held at EXTEND — air-gap UNMEASURED'],
   };
   return {
-    domain: 'Identity & Access Management (IAM)', generatedAtIso: '2026-07-09T00:00:00.000Z', subDomains: [sub],
+    domain: 'Identity & Access Management (IAM)', productMode: 'sovereign', generatedAtIso: '2026-07-09T00:00:00.000Z', subDomains: [sub],
     sovereign: {} as HarvestReport['sovereign'], reviewer: [], redTeam: [], moat: [], marketPosition: [], limitations: [], status: 'STOP-AWAITING-HUMAN-APPROVAL',
   };
 }

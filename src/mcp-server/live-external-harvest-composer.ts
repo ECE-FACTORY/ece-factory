@@ -21,7 +21,8 @@ import {
 /** The REAL Wave-3 sourcing engines bundled behind the composer's port (the actual factory engines, reused). */
 export const REAL_SOURCING_ENGINES: SourcingEngines = {
   classifyLicense,
-  scoreCandidate,
+  // The composer's port is sovereign (the external-harvest path); bind the mode explicitly, never defaulted.
+  scoreCandidate: (c) => scoreCandidate(c, 'sovereign'),
   assessSovereignReadiness: (d) => ({ verdict: assessSovereignReadiness(d).verdict }),
   assessWhiteLabel: (e) => ({ verdict: assessWhiteLabel(e).verdict }),
 };

@@ -33,7 +33,7 @@ const MGOURLIS: ScoringCandidate = {
 };
 
 function reconstruct(): GradedCandidate {
-  const score = scoreCandidate(MGOURLIS);
+  const score = scoreCandidate(MGOURLIS, 'sovereign');
   expect(score.total).toBe(70.8); // self-check vs the report
   const identity = { host: 'github.com', owner: 'mgourlis', name: 'stateful-abac-policy-engine' };
   const record: RepoEvaluationRecord = {
@@ -53,7 +53,7 @@ function iamReport(spine: GradedCandidate): HarvestReport {
     subDomain: { key: 'authorization-policy', title: 'Authorization & Policy (RBAC/ABAC)', query: 'q' },
     candidates: [spine], spine, decision: 'EXTEND', decisionEvidence: ['EXTEND — air-gap unmeasured'],
   };
-  return { domain: 'Identity & Access Management (IAM)', generatedAtIso: '2026-07-09T00:00:00.000Z', subDomains: [sub],
+  return { domain: 'Identity & Access Management (IAM)', productMode: 'sovereign', generatedAtIso: '2026-07-09T00:00:00.000Z', subDomains: [sub],
     sovereign: {} as HarvestReport['sovereign'], reviewer: [], redTeam: [], moat: [], marketPosition: [], limitations: [], status: 'STOP-AWAITING-HUMAN-APPROVAL' };
 }
 
@@ -130,7 +130,7 @@ describe('EXERCISE B — Phase B: scaffold-write gate + confirm ⇒ real sandbox
     const audit: FilesystemExecutorAudit = { appendIntent() {}, appendResult() {}, appendRefusal() {} };
     const ctx: ExecuteContext = { audit, human: OPERATOR, organizationId: 'org_ece', environment: 'local' };
     const out = await orch.execute(planned.plannedWrite!, approvalForExec, confirm, ctx);
-    log(`[B] execute ⇒ ok=${out.ok} status=${out.status} created=${out.created.length}${out.reason ? ` reason=${out.reason}` : ''}`);
+    log(`[B] execute ⇒ ok=${out.ok} status=${out.status} created=${out.created.length}${'reason' in out ? ` reason=${out.reason}` : ''}`);
     expect(out.ok).toBe(true);
     expect(out.status).toBe('written');
 

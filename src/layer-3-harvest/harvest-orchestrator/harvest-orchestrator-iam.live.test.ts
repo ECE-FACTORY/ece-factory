@@ -61,7 +61,7 @@ describe('Harvest Orchestrator — LIVE end-to-end for Identity & Access Managem
     const scout = new RepoScout({ token: TOKEN }); // real GitHub reads live in repo-scout only
     const orch = new HarvestOrchestrator(scout, { maxPerSubDomain: 5, signalsPort: liveSignalsPort(TOKEN!) });
 
-    const res = await orch.run('Identity & Access Management');
+    const res = await orch.run('Identity & Access Management', 'sovereign');
 
     // SECURITY GATE BEFORE PERSISTENCE: scan the in-memory report for any credential material and THROW without
     // writing if found — a token-contaminated report must NEVER touch disk. This covers the live token itself

@@ -73,7 +73,8 @@ export function promoteToFork(decision: SubDomainResult, airGap: AirGapAssessmen
   };
 
   // Re-derive the verdict from Layer-3's OWN function on the air-gap-completed spine. FORK, or we refuse.
-  const rederived = decideSourcing([promotedSpine]);
+  // The seam is SOVEREIGN-only (it folds air-gap); the mode is passed explicitly, never defaulted.
+  const rederived = decideSourcing([promotedSpine], 'sovereign');
   if (rederived.decision !== 'FORK') {
     return { ok: false, stage: 'promotion', reason: `re-derived verdict is ${rederived.decision}, not FORK, even with air-gap=${airGap.value} — this spine is not one measurement away from a FORK` };
   }
@@ -103,7 +104,7 @@ export interface PreparedBuildDecision {
 
 export type PrepareOutcome =
   | { readonly status: 'PENDING-APPROVAL'; readonly prepared: PreparedBuildDecision }
-  | { readonly status: 'refused'; readonly stage: 'lookup' | 'precondition' | 'promotion'; readonly reason: string };
+  | { readonly status: 'refused'; readonly stage: 'mode' | 'lookup' | 'precondition' | 'promotion'; readonly reason: string };
 
 export type AssembleOutcome =
   | { readonly status: 'APPROVED-BUILD-DECISION'; readonly approved: ApprovedBuildDecision }
@@ -142,6 +143,11 @@ export class BuildDecisionSeam {
 
   /** Phase 1 — guard, promote, and enqueue the promotion as a held Approval-Gate action for a human to approve. */
   prepare(input: { report: HarvestReport; subDomainKey: string; airGap: AirGapAssessmentInput }): PrepareOutcome {
+    // SOVEREIGN-ONLY GUARD (fail-closed). This seam folds AIR-GAP to promote EXTEND→FORK; it is meaningless for a
+    // subscription report (air-gap is not scored there). A subscription-mode promotion is a FUTURE, separate seam.
+    if (input.report.productMode !== 'sovereign') {
+      return { status: 'refused', stage: 'mode', reason: `build-decision seam is sovereign-only; report productMode is "${input.report.productMode}" (a subscription promotion seam is not built yet)` };
+    }
     const sub = input.report.subDomains.find((s) => s.subDomain.key === input.subDomainKey);
     if (!sub) return { status: 'refused', stage: 'lookup', reason: `no sub-domain "${input.subDomainKey}" in the harvest report for "${input.report.domain}"` };
 

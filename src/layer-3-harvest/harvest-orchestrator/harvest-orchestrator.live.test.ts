@@ -57,7 +57,7 @@ describe('Harvest Orchestrator — LIVE end-to-end (skips without GITHUB_TOKEN)'
     const scout = new RepoScout({ token: TOKEN }); // real GitHub reads live in repo-scout only
     const orch = new HarvestOrchestrator(scout, { maxPerSubDomain: 5, signalsPort: liveSignalsPort(TOKEN!) });
 
-    const res = await orch.run('Legal & Contract Operations');
+    const res = await orch.run('Legal & Contract Operations', 'sovereign');
 
     // The chain must complete against real GitHub and produce a STOP report.
     expect(res.status).toBe('OK');

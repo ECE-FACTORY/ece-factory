@@ -16,7 +16,7 @@ import { BuildDecisionSeam, promoteToFork } from './build-decision-seam.js';
 
 // ── Fixtures — a GradedCandidate whose score comes from the REAL scoring engine (air-gap left UNMEASURED). ──
 function gradedSpine(opts: { scoring: ScoringCandidate; eligibility?: RepoEvaluationRecord['eligibility'] }): GradedCandidate {
-  const score = scoreCandidate(opts.scoring);
+  const score = scoreCandidate(opts.scoring, 'sovereign');
   const identity = { host: 'github.com', owner: 'acme', name: 'engine' };
   const record: RepoEvaluationRecord = {
     evaluatedAtIso: '2026-07-07T00:00:00.000Z', identity,
@@ -56,7 +56,7 @@ function subResult(spine: GradedCandidate | null, decision: SubDomainResult['dec
 
 function report(sub: SubDomainResult): HarvestReport {
   return {
-    domain: 'Legal & Contract Ops', generatedAtIso: '2026-07-07T12:00:00.000Z', subDomains: [sub],
+    domain: 'Legal & Contract Ops', productMode: 'sovereign', generatedAtIso: '2026-07-07T12:00:00.000Z', subDomains: [sub],
     sovereign: {} as HarvestReport['sovereign'], reviewer: [], redTeam: [], moat: [], marketPosition: [], limitations: [],
     status: 'STOP-AWAITING-HUMAN-APPROVAL',
   };

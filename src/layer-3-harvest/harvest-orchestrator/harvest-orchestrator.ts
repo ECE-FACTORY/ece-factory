@@ -46,7 +46,8 @@ import { RepoIntelligenceEngine, scoringInputs } from '../repo-intelligence/repo
 import type { RepoEvaluationRecord, RepoIdentity, LicenseClassifier, LicenseDecision, ScoringInputs } from '../repo-intelligence/repo-intelligence.js';
 import { classifyLicense, detectFromText } from '../license-compliance/license-compliance.js';
 import { scoreCandidate, candidateFromScoringInputs } from '../scoring-engine/scoring-engine.js';
-import type { ScoreResult, ScoreBand, ArchFitRating } from '../scoring-engine/scoring-engine.js';
+import type { ScoreResult, ScoreBand, ArchFitRating, ProductMode } from '../scoring-engine/scoring-engine.js';
+export type { ProductMode } from '../scoring-engine/scoring-engine.js';
 import { assessSovereignReadiness } from '../sovereign-readiness/sovereign-readiness.js';
 import type { SovereignDescriptor, SovereignReport } from '../sovereign-readiness/sovereign-readiness.js';
 // TYPE-ONLY: the signals scout's output shapes. All of its network egress lives in repo-scout-signals; this
@@ -135,6 +136,8 @@ export interface ReviewerFinding {
 
 export interface HarvestReport {
   domain: string;
+  /** The product lens this report was harvested under — REQUIRED; every report declares its mode. */
+  productMode: ProductMode;
   generatedAtIso: string;
   subDomains: SubDomainResult[];
   sovereign: SovereignReport;          // real assessSovereignReadiness (empty descriptor ⇒ deny-by-default)
@@ -245,6 +248,7 @@ export function enrichScore(
   inputs: ScoringInputs,
   baseScore: ScoreResult,
   signals: RepoSignals | null,
+  mode: ProductMode,
 ): { score: ScoreResult; enrichment: EnrichmentTrace } {
   if (!signals || signals.status !== 'OK') {
     return {
@@ -280,7 +284,7 @@ export function enrichScore(
   // AIR-GAP + WHITE-LABEL — deliberately NOT passed: they remain the record's deny-by-default 'unknown' (0).
   // A found cloud blocker (air-gap 'no') is surfaced as evidence in the trace but never lifts the score.
 
-  const score = scoreCandidate(candidateFromScoringInputs(inputs, extra));
+  const score = scoreCandidate(candidateFromScoringInputs(inputs, extra), mode);
   return {
     score,
     enrichment: {
@@ -362,7 +366,7 @@ export function domainNarrative(domain: string): { moat: string[]; marketPositio
 
 // ── Stage 4 (pure): decision from the real (possibly enriched) score ───────────────────────────────────
 
-export function decideSourcing(candidates: GradedCandidate[]): { decision: SourcingDecision; evidence: string[] } {
+export function decideSourcing(candidates: GradedCandidate[], mode: ProductMode): { decision: SourcingDecision; evidence: string[] } {
   const evidence: string[] = [];
   if (candidates.length === 0) {
     return { decision: 'BUILD', evidence: ['no candidate repositories discovered for this sub-domain'] };
@@ -377,7 +381,8 @@ export function decideSourcing(candidates: GradedCandidate[]): { decision: Sourc
   }
   const spine = pickSpine(eligible);
   const { total, band, measuredCount } = spine.score;
-  evidence.push(`spine: ${spine.identity.owner}/${spine.identity.name} — real score ${total}/100, band "${band}" (${measuredCount}/6 dims measured, coverage ${Math.round(spine.score.measuredWeightFraction * 100)}%)`);
+  const dimsCount = spine.score.subScores.length; // 6 (sovereign) / 7 (subscription)
+  evidence.push(`spine: ${spine.identity.owner}/${spine.identity.name} — real score ${total}/100, band "${band}" (${measuredCount}/${dimsCount} dims measured, coverage ${Math.round(spine.score.measuredWeightFraction * 100)}%)`);
   // TRACEABILITY: if enrichment MATERIALLY changed the score (total or band), record EXACTLY which measured/bounded
   // signals justified it — a verdict that changed must be attributable to specific fetched evidence. Under
   // normalization the band often does NOT move (a base measured on 2 strong dims already bands high), yet enrichment
@@ -400,39 +405,54 @@ export function decideSourcing(candidates: GradedCandidate[]): { decision: Sourc
   //   else   normalized < 55 OR < 3 dims measured ⇒ NEEDS-ASSESSMENT.
   // Unmeasured dims are EXCLUDED from the score (never assumed good) — the floor, not a deny-by-default 0, is what
   // holds an under-assessed repo back.
-  const airGapMeasured = spine.score.subScores.some((s) => s.dimension === 'air-gap' && s.measured);
-  const whiteLabelMeasured = spine.score.subScores.some((s) => s.dimension === 'white-label' && s.measured);
+  // MODE-SELECTED HARD GATE. sovereign → air-gap; subscription → multi-tenancy. The sovereign path (dimension,
+  // wording, flags) is byte-identical to before the switch. A candidate scored under the OTHER mode has no
+  // `gateDim` sub-score at all, so `gateMeasured` is false ⇒ the gate FAILS CLOSED under mode confusion (§4).
+  const gateDim = mode === 'sovereign' ? 'air-gap' : 'multi-tenancy';
+  const gateMeasured = spine.score.subScores.some((s) => s.dimension === gateDim && s.measured);
+  const whiteLabelMeasured = spine.score.subScores.some((s) => s.dimension === 'white-label' && s.measured); // sovereign flag only
   const enoughMeasured = measuredCount >= 3;
   const scorePassesFork = band === 'strong' || band === 'acceptable'; // normalized ≥ 70
   const scorePassesExtend = scorePassesFork || band === 'risky';       // normalized ≥ 55
   const unmeasured = spine.score.subScores.filter((s) => !s.measured).map((s) => s.dimension);
   const unmeasuredLine = `unmeasured at decision: ${unmeasured.length ? unmeasured.join(', ') : 'none'}`;
 
-  // GLASS-BOX: a FORK/EXTEND must never be silent about a sovereign-relevant dimension it did NOT assess. Raise a
-  // human-approval flag for any unmeasured air-gap / white-label on a promotion — mirrors the air-gap<10 gate.
+  // GLASS-BOX: a FORK/EXTEND must never be silent about the mode-critical dimension it did NOT assess. Raise a
+  // human-approval flag for the unmeasured gate dimension (+ sovereign white-label) on a promotion.
   const promotionFlags = (): string[] => {
     const f: string[] = [];
-    if (!airGapMeasured) f.push('HUMAN APPROVAL REQUIRED: air-gap is UNMEASURED — a human must assess the sovereign air-gap dimension before this becomes a FORK (a machine never auto-forks without measured air-gap)');
-    if (!whiteLabelMeasured) f.push('HUMAN APPROVAL REQUIRED: white-label is UNMEASURED — a human must assess rebrand/telemetry friction before adoption');
+    if (mode === 'sovereign') {
+      if (!gateMeasured) f.push('HUMAN APPROVAL REQUIRED: air-gap is UNMEASURED — a human must assess the sovereign air-gap dimension before this becomes a FORK (a machine never auto-forks without measured air-gap)');
+      if (!whiteLabelMeasured) f.push('HUMAN APPROVAL REQUIRED: white-label is UNMEASURED — a human must assess rebrand/telemetry friction before adoption');
+    } else {
+      if (!gateMeasured) f.push('HUMAN APPROVAL REQUIRED: multi-tenancy is UNMEASURED — a human must assess tenant isolation before this becomes a FORK (a machine never auto-forks without measured multi-tenancy)');
+    }
     return f;
   };
 
-  // FORK — full confidence (air-gap measured).
-  if (enoughMeasured && airGapMeasured && scorePassesFork) {
-    return { decision: 'FORK', evidence: [...evidence, `normalized ${total}/100 ≥ 70 (${band}), ${measuredCount}/6 dims measured incl. air-gap — FORK: fork and white-label`, unmeasuredLine, ...promotionFlags()] };
+  // FORK — full confidence (the mode-critical gate dimension measured).
+  if (enoughMeasured && gateMeasured && scorePassesFork) {
+    const forkLine = mode === 'sovereign'
+      ? `normalized ${total}/100 ≥ 70 (${band}), ${measuredCount}/${dimsCount} dims measured incl. air-gap — FORK: fork and white-label`
+      : `normalized ${total}/100 ≥ 70 (${band}), ${measuredCount}/${dimsCount} dims measured incl. multi-tenancy — FORK: fork and white-label`;
+    return { decision: 'FORK', evidence: [...evidence, forkLine, unmeasuredLine, ...promotionFlags()] };
   }
-  // EXTEND — partial confidence (≥3 measured, score ≥ 55, but not a qualified FORK). Air-gap flagged if unmeasured.
+  // EXTEND — partial confidence (≥3 measured, score ≥ 55, but not a qualified FORK). Gate dim flagged if unmeasured.
   if (enoughMeasured && scorePassesExtend) {
-    const reason = !airGapMeasured
-      ? `normalized ${total}/100 ≥ 55 on ${measuredCount}/6 measured dims, but air-gap UNMEASURED — EXTEND (fork then build the gap); air-gap still needs a human before any FORK`
-      : `normalized ${total}/100 in 55–69 (risky) with ${measuredCount}/6 dims measured — EXTEND: fork then build the gap`;
+    const reason = mode === 'sovereign'
+      ? (!gateMeasured
+          ? `normalized ${total}/100 ≥ 55 on ${measuredCount}/${dimsCount} measured dims, but air-gap UNMEASURED — EXTEND (fork then build the gap); air-gap still needs a human before any FORK`
+          : `normalized ${total}/100 in 55–69 (risky) with ${measuredCount}/${dimsCount} dims measured — EXTEND: fork then build the gap`)
+      : (!gateMeasured
+          ? `normalized ${total}/100 ≥ 55 on ${measuredCount}/${dimsCount} measured dims, but multi-tenancy UNMEASURED — EXTEND (fork then build the gap); multi-tenancy still needs a human before any FORK`
+          : `normalized ${total}/100 in 55–69 (risky) with ${measuredCount}/${dimsCount} dims measured — EXTEND: fork then build the gap`);
     return { decision: 'EXTEND', evidence: [...evidence, reason, unmeasuredLine, ...promotionFlags()] };
   }
 
   // else — normalized < 55 (genuinely weak on measured dims) OR < 3 dims measured (too little assessed). For an
   // ELIGIBLE, permissive spine this is NEEDS-ASSESSMENT — nothing proves a rebuild is needed.
   const why = !enoughMeasured
-    ? `only ${measuredCount}/6 dimensions measured (< confidence floor of 3) — too little assessed to FORK/EXTEND, regardless of the ${total}/100 partial score`
+    ? `only ${measuredCount}/${dimsCount} dimensions measured (< confidence floor of 3) — too little assessed to FORK/EXTEND, regardless of the ${total}/100 partial score`
     : `normalized ${total}/100 is below 55 on ${measuredCount} measured dimensions — genuinely weak on what was assessed`;
   return {
     decision: 'NEEDS-ASSESSMENT',
@@ -465,7 +485,7 @@ export class HarvestOrchestrator {
     this.repoIntel = new RepoIntelligenceEngine(licenseClassifier, this.now);
   }
 
-  async run(domain = 'Legal & Contract Operations'): Promise<OrchestratorResult> {
+  async run(domain: string, mode: ProductMode): Promise<OrchestratorResult> {
     const subDomains = decompose(domain);
     if (subDomains.length === 0) {
       return { status: 'FAILED_CLOSED', report: null, reportMarkdown: null, reason: `no decomposition available for domain "${domain}"` };
@@ -480,12 +500,12 @@ export class HarvestOrchestrator {
       }
       // Grade each candidate; enrich with the signals scout when a port is injected (per-candidate, tolerant).
       const graded: GradedCandidate[] = [];
-      for (const c of scouted.candidates) graded.push(this.grade(c, await this.gatherSignals(c)));
-      const { decision, evidence } = decideSourcing(graded);
+      for (const c of scouted.candidates) graded.push(this.grade(c, await this.gatherSignals(c), mode));
+      const { decision, evidence } = decideSourcing(graded, mode);
       results.push({ subDomain: sd, candidates: graded, spine: graded.length ? pickSpineOrNull(graded) : null, decision, decisionEvidence: evidence });
     }
 
-    const report = this.assemble(domain, results);
+    const report = this.assemble(domain, results, mode);
     return { status: 'OK', report, reportMarkdown: this.renderMarkdown(report) };
   }
 
@@ -502,11 +522,11 @@ export class HarvestOrchestrator {
 
   /** Stage 3 (+ 3b): run ONE candidate through the real graders, then re-grade under the confidence contract
    *  when signals are available. Without signals, `score` is the un-enriched deny-by-default grade (unchanged). */
-  private grade(c: ScoutedCandidate, signals: RepoSignals | null): GradedCandidate {
+  private grade(c: ScoutedCandidate, signals: RepoSignals | null, mode: ProductMode): GradedCandidate {
     const record = this.repoIntel.evaluate(c.evaluationInput);                 // repo-intelligence.ts:109
     const inputs = scoringInputs(record);                                      // scoring-engine.ts:90
-    const baseScore = scoreCandidate(candidateFromScoringInputs(inputs));      // scoring-engine.ts:51 / :131 (deny-by-default)
-    const { score, enrichment } = enrichScore(inputs, baseScore, signals);     // Stage 3b — confidence contract
+    const baseScore = scoreCandidate(candidateFromScoringInputs(inputs), mode); // scoring-engine.ts:51 / :131 (deny-by-default)
+    const { score, enrichment } = enrichScore(inputs, baseScore, signals, mode); // Stage 3b — confidence contract
     return {
       repoUrl: c.repoUrl,
       identity: record.identity,
@@ -522,7 +542,7 @@ export class HarvestOrchestrator {
   }
 
   /** Stages 5 + 6: assemble the report and run the independent reviewer re-derivation. */
-  private assemble(domain: string, results: SubDomainResult[]): HarvestReport {
+  private assemble(domain: string, results: SubDomainResult[], mode: ProductMode): HarvestReport {
     // Real sovereign call over an EMPTY descriptor — the scout sources no deployment facts, so this is the
     // honest deny-by-default verdict (Acceptable-after-hardening), never a fabricated "Acceptable".
     const emptyDescriptor: SovereignDescriptor = {};
@@ -548,6 +568,7 @@ export class HarvestOrchestrator {
     const narrative = domainNarrative(domain);
     return {
       domain,
+      productMode: mode,
       generatedAtIso: new Date(this.now()).toISOString(),
       subDomains: results,
       sovereign,
@@ -575,7 +596,7 @@ export class HarvestOrchestrator {
   renderMarkdown(report: HarvestReport): string {
     const L: string[] = [];
     L.push(`# Harvest Report — ${report.domain}`, '');
-    L.push(`**Status:** ${report.status} · **Generated:** ${report.generatedAtIso}`, '');
+    L.push(`**Product mode:** ${report.productMode.toUpperCase()} · **Status:** ${report.status} · **Generated:** ${report.generatedAtIso}`, '');
     L.push('> READ-ONLY harvest pass. Scores come from the real graders on scout-sourced evidence. No build, fork, or external action was taken. Awaiting human approval.', '');
 
     L.push('## 1. Sub-domain decomposition & decisions', '');

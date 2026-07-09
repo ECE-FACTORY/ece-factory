@@ -446,6 +446,43 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     }
   });
 
+  // ── Prohibition 4j (added additively) — PRODUCT MODE cannot be silently defaulted ─────────────────────
+  // The sovereign/subscription product-mode switch adds a lens to the harvest/scoring path. The safety law: a
+  // mode is NEVER inferred or defaulted — it is a REQUIRED parameter of scoreCandidate + decideSourcing (no
+  // default, not optional), and a REQUIRED field on every HarvestReport. The sovereign air-gap FORK gate stays
+  // bound to `mode === 'sovereign'`, so no mode — nor any mode confusion — can bypass it (a non-sovereign
+  // candidate simply has no air-gap sub-score, so the sovereign gate fails closed). Behavioral coverage of the
+  // gate itself lives in the module tests (scoring-engine / harvest-orchestrator); this freezes the STATIC
+  // no-silent-default shape. Purely ADDITIVE — changes NONE of the assertions above.
+  it('Prohibition 4j — product mode is a required, undefaulted parameter of scoreCandidate + decideSourcing, a required report field, and the air-gap gate stays sovereign-bound', () => {
+    const scoringRaw = readFileSync(join(SRC, 'layer-3-harvest', 'scoring-engine', 'scoring-engine.ts'), 'utf8');
+    const orchRaw = readFileSync(join(SRC, 'layer-3-harvest', 'harvest-orchestrator', 'harvest-orchestrator.ts'), 'utf8');
+    const scoring = stripComments(scoringRaw);
+    const orch = stripComments(orchRaw);
+
+    // 1. ProductMode is exactly the two literals, defined once (in the scoring engine).
+    expect(/export type ProductMode\s*=\s*'sovereign'\s*\|\s*'subscription'\s*;/.test(scoring)).toBe(true);
+
+    // 2. scoreCandidate takes `mode: ProductMode` as a REQUIRED param — not optional, not defaulted.
+    expect(/export function scoreCandidate\s*\([^)]*\bmode:\s*ProductMode\b[^)]*\)/s.test(scoring)).toBe(true);
+    expect(/scoreCandidate\s*\([^)]*\bmode\?\s*:/s.test(scoring)).toBe(false);          // no optional
+    expect(/scoreCandidate\s*\([^)]*\bmode:\s*ProductMode\s*=/s.test(scoring)).toBe(false); // no default
+
+    // 3. decideSourcing takes `mode: ProductMode` as a REQUIRED param — not optional, not defaulted.
+    expect(/export function decideSourcing\s*\([^)]*\bmode:\s*ProductMode\b[^)]*\)/s.test(orch)).toBe(true);
+    expect(/decideSourcing\s*\([^)]*\bmode\?\s*:/s.test(orch)).toBe(false);
+    expect(/decideSourcing\s*\([^)]*\bmode:\s*ProductMode\s*=/s.test(orch)).toBe(false);
+
+    // 4. HarvestReport carries a REQUIRED productMode field (not optional).
+    expect(/productMode:\s*ProductMode\s*;/.test(orch)).toBe(true);
+    expect(/productMode\?\s*:/.test(orch)).toBe(false);
+
+    // 5. The air-gap FORK gate stays SOVEREIGN-BOUND — decideSourcing selects the gate dimension by mode, and the
+    //    sovereign gate is the air-gap dimension. Mode confusion can only fail closed, never bypass it.
+    expect(/'air-gap'/.test(orch)).toBe(true);
+    expect(/mode === 'sovereign'/.test(orch)).toBe(true);
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven

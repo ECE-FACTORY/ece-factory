@@ -18,7 +18,7 @@ import { BuildDecisionSeam, promoteToFork } from '../../src/layer-2-command/buil
 
 // Rebuild a report spine as a GradedCandidate via the REAL engine. `expectTotal` is the report's published score.
 function reconstruct(opts: { owner: string; name: string; scoring: ScoringCandidate; expectTotal: number }): GradedCandidate {
-  const score = scoreCandidate(opts.scoring);
+  const score = scoreCandidate(opts.scoring, 'sovereign');
   // SELF-CHECK: the reconstruction must reproduce the harvest report exactly, or we stop.
   expect(score.total, `reconstruction of ${opts.owner}/${opts.name} must match the report`).toBe(opts.expectTotal);
   const identity = { host: 'github.com', owner: opts.owner, name: opts.name };
@@ -46,7 +46,7 @@ function subResult(spine: GradedCandidate): SubDomainResult {
 
 function iamReport(spine: GradedCandidate): HarvestReport {
   return {
-    domain: 'Identity & Access Management (IAM)', generatedAtIso: '2026-07-09T00:00:00.000Z', subDomains: [subResult(spine)],
+    domain: 'Identity & Access Management (IAM)', productMode: 'sovereign', generatedAtIso: '2026-07-09T00:00:00.000Z', subDomains: [subResult(spine)],
     sovereign: {} as HarvestReport['sovereign'], reviewer: [], redTeam: [], moat: [], marketPosition: [], limitations: [],
     status: 'STOP-AWAITING-HUMAN-APPROVAL',
   };
@@ -73,7 +73,7 @@ const MGOURLIS_ABAC: ScoringCandidate = {
 function show(label: string, spine: GradedCandidate, airGap: 'yes' | 'partial' | 'no') {
   const before = spine.score;
   const after = foldAirGapMeasurement(before, airGap);
-  const verdict = decideSourcing([{ ...spine, record: { ...spine.record, airGapSuitability: airGap }, score: after }]);
+  const verdict = decideSourcing([{ ...spine, record: { ...spine.record, airGapSuitability: airGap }, score: after }], 'sovereign');
   // eslint-disable-next-line no-console
   console.log(`\n[${label}] base ${before.total}/100 (${before.band}, ${before.measuredCount}/6 measured) ` +
     `— fold air-gap='${airGap}' ⇒ ${after.total}/100 (${after.band}, ${after.measuredCount}/6 measured) ⇒ decideSourcing = ${verdict.decision}`);

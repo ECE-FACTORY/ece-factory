@@ -12,17 +12,27 @@
 // STANDALONE-PACKAGEABLE: the only cross-engine references are `import type` (Repo Intelligence + License
 // decision types) — zero runtime coupling.
 
-import type { LicenseDecision, MaturitySignals, AirGapSuitability, WhiteLabelFit, ScoringInputs } from '../repo-intelligence/repo-intelligence.js';
+import type { LicenseDecision, MaturitySignals, AirGapSuitability, WhiteLabelFit, MultiTenancy, BillingHooks, CloudNative, ScoringInputs } from '../repo-intelligence/repo-intelligence.js';
 
 export type ArchFitRating = 'strong' | 'good' | 'possible' | 'poor';
 export type MaintainabilityRating = 'clean' | 'maintainable' | 'hard' | 'unsafe';
 export type Verdict = 'FORK' | 'EXTEND' | 'BUILD';
 
+/**
+ * The product lens for a harvest run. Chosen upfront, threaded as a REQUIRED parameter (never defaulted), and
+ * stamped into every report. `sovereign` = today's behaviour (air-gap is a hard FORK gate). `subscription`
+ * ignores air-gap entirely and rewards multi-tenancy, billing hooks, and cloud-native architecture.
+ */
+export type ProductMode = 'sovereign' | 'subscription';
+
 export interface ScoringCandidate {
   license: { decision: LicenseDecision; detected: string };
   maturity?: MaturitySignals;
-  airGap?: AirGapSuitability;
-  whiteLabel?: WhiteLabelFit;
+  airGap?: AirGapSuitability;          // sovereign-only
+  whiteLabel?: WhiteLabelFit;          // sovereign-only
+  multiTenancy?: MultiTenancy;         // subscription-only
+  billingHooks?: BillingHooks;         // subscription-only
+  cloudNative?: CloudNative;           // subscription-only
   archFit?: { rating: ArchFitRating; note?: string };
   maintainability?: { rating: MaintainabilityRating; note?: string };
   isSpine?: boolean;
@@ -73,6 +83,9 @@ export function candidateFromScoringInputs(
     maturity: s.maturity ?? undefined,
     airGap: s.airGapSuitability,
     whiteLabel: s.whiteLabelFit,
+    multiTenancy: s.multiTenancy,   // subscription dims — ignored by scoreCandidate under 'sovereign'
+    billingHooks: s.billingHooks,
+    cloudNative: s.cloudNative,
     // arch-fit rating must be supplied (a freeform note alone is not a score); merge the record's note if absent.
     archFit: extra.archFit ? { rating: extra.archFit.rating, note: extra.archFit.note ?? s.architectureFitNotes ?? undefined } : undefined,
     maintainability: extra.maintainability,
@@ -163,6 +176,35 @@ function scoreMaintainability(c: ScoringCandidate): SubScore {
   }
 }
 
+// ── Subscription-mode sub-scores (product-mode switch). Same pessimistic, evidence-or-unmeasured discipline. ──
+/** Multi-tenancy — the subscription analog of air-gap: HUMAN-assessed, deny-by-default when unknown. Max 15. */
+export function multiTenancySubScore(value: MultiTenancy | undefined): SubScore {
+  switch (value) {
+    case 'full': return { dimension: 'multi-tenancy', score: 15, max: 15, evidence: 'tenant isolation by design (schema/row-level/tenant-scoped)', flagged: false, measured: true };
+    case 'partial': return { dimension: 'multi-tenancy', score: 9, max: 15, evidence: 'single-tenant with a multi-tenant bolt-on', flagged: true, measured: true };
+    case 'none': return { dimension: 'multi-tenancy', score: 3, max: 15, evidence: 'explicitly single-tenant', flagged: true, measured: true };
+    default: return { dimension: 'multi-tenancy', score: 0, max: 15, evidence: 'multi-tenancy unknown (deny-by-default)', flagged: true, measured: false };
+  }
+}
+/** Billing / subscription hooks — machine-detectable to 'integratable' (billing SDK dep); 'native' is human-confirmed. Max 10. */
+export function billingHooksSubScore(value: BillingHooks | undefined): SubScore {
+  switch (value) {
+    case 'native': return { dimension: 'billing-hooks', score: 10, max: 10, evidence: 'native subscription/billing lifecycle', flagged: false, measured: true };
+    case 'integratable': return { dimension: 'billing-hooks', score: 6, max: 10, evidence: 'billing SDK present — integratable (a dep proves a hook, not subscription-grade)', flagged: false, measured: true };
+    case 'none': return { dimension: 'billing-hooks', score: 2, max: 10, evidence: 'no billing integration found', flagged: true, measured: true };
+    default: return { dimension: 'billing-hooks', score: 0, max: 10, evidence: 'billing hooks unknown (deny-by-default)', flagged: true, measured: false };
+  }
+}
+/** Cloud-native / scalable — machine-measurable from Dockerfile/k8s/helm/cloud-SDK evidence. Max 10. */
+export function cloudNativeSubScore(value: CloudNative | undefined): SubScore {
+  switch (value) {
+    case 'strong': return { dimension: 'cloud-native', score: 10, max: 10, evidence: 'container/orchestration-native, horizontally scalable', flagged: false, measured: true };
+    case 'partial': return { dimension: 'cloud-native', score: 6, max: 10, evidence: 'some cloud-native evidence (Dockerfile / cloud SDK)', flagged: false, measured: true };
+    case 'poor': return { dimension: 'cloud-native', score: 2, max: 10, evidence: 'not designed for cloud / scale', flagged: true, measured: true };
+    default: return { dimension: 'cloud-native', score: 0, max: 10, evidence: 'cloud-native fit unknown (deny-by-default)', flagged: true, measured: false };
+  }
+}
+
 /**
  * NORMALIZE over MEASURED dimensions only. An UNMEASURED dimension ("couldn't measure") is EXCLUDED from both
  * numerator and denominator — it is NEVER scored 0 (which would be arithmetically identical to "measured as
@@ -188,14 +230,18 @@ export function bandFor(total: number, rejected: boolean): ScoreBand {
   return 'reject';
 }
 
-export function scoreCandidate(c: ScoringCandidate): ScoreResult {
-  const subScores = [scoreLicense(c), scoreMaturity(c), scoreAirGap(c), scoreWhiteLabel(c), scoreArchFit(c), scoreMaintainability(c)];
+export function scoreCandidate(c: ScoringCandidate, mode: ProductMode): ScoreResult {
+  // PROFILE = which dimensions exist for this lens. Universal-4 in both modes; sovereign adds air-gap +
+  // white-label, subscription adds multi-tenancy + billing-hooks + cloud-native (air-gap NOT scored at all).
+  // The sovereign array is byte-identical to the pre-switch order — sovereign behaviour is unchanged.
+  const subScores = mode === 'sovereign'
+    ? [scoreLicense(c), scoreMaturity(c), scoreAirGap(c), scoreWhiteLabel(c), scoreArchFit(c), scoreMaintainability(c)]
+    : [scoreLicense(c), scoreMaturity(c), scoreArchFit(c), scoreMaintainability(c), multiTenancySubScore(c.multiTenancy), billingHooksSubScore(c.billingHooks), cloudNativeSubScore(c.cloudNative)];
 
   const { total, measuredCount, measuredWeightFraction } = normalizeMeasured(subScores);
 
-  const license = subScores[0]!;
-  const maturity = subScores[1]!;
-  const airGap = subScores[2]!;
+  const license = subScores.find((s) => s.dimension === 'license')!;   // present in both profiles
+  const maturity = subScores.find((s) => s.dimension === 'maturity')!;  // present in both profiles
   const flags: string[] = [];
 
   // Hard gate — License 0 ⇒ automatic rejection (cannot be outweighed). UNCHANGED.
@@ -204,8 +250,15 @@ export function scoreCandidate(c: ScoringCandidate): ScoreResult {
   // Hard gate — spine must score ≥15 maturity.
   if (c.isSpine && maturity.score < 15) flags.push(`spine candidate scores ${maturity.score}/20 on maturity (< 15) — a spine must be mature`);
 
-  // Hard gate — air-gap below 10 ⇒ human-approval flag (sovereign requirement).
-  if (airGap.score < 10) flags.push(`air-gap ${airGap.score}/20 (< 10) — human approval required (sovereign requirement)`);
+  // Mode-critical HUMAN-gate hint — sovereign: air-gap < 10; subscription: multi-tenancy < 9. Mirrors the old
+  // air-gap<10 flag; the actual FORK gate lives at the verdict layer (decideSourcing). Sovereign string is verbatim.
+  if (mode === 'sovereign') {
+    const airGap = subScores.find((s) => s.dimension === 'air-gap')!;
+    if (airGap.score < 10) flags.push(`air-gap ${airGap.score}/20 (< 10) — human approval required (sovereign requirement)`);
+  } else {
+    const tenancy = subScores.find((s) => s.dimension === 'multi-tenancy')!;
+    if (tenancy.score < 9) flags.push(`multi-tenancy ${tenancy.score}/15 (< 9) — human approval required (subscription requirement)`);
+  }
 
   // §3.9 — a 70+ candidate steered to BUILD is flagged, BUT ONLY when the normalized score is backed by real
   // confidence: ≥3 measured dimensions (the promotion floor). §3.9 protects REUSE (FORK *or* EXTEND); an EXTEND
@@ -214,7 +267,7 @@ export function scoreCandidate(c: ScoringCandidate): ScoreResult {
   // "reuse beats rebuild" objection to a BUILD.
   const confidentForReuse = measuredCount >= 3;
   if (!rejected && total >= 70 && confidentForReuse && c.proposedVerdict === 'BUILD') {
-    flags.push(`§3.9: candidate scores ${total}/100 (70+, ${measuredCount}/6 dims measured) yet verdict is BUILD — requires a proven blocking issue + human review (reuse beats rebuild)`);
+    flags.push(`§3.9: candidate scores ${total}/100 (70+, ${measuredCount}/${subScores.length} dims measured) yet verdict is BUILD — requires a proven blocking issue + human review (reuse beats rebuild)`);
   }
 
   const band = bandFor(total, rejected);
