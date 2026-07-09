@@ -1,12 +1,17 @@
 // Adapter unit tests — each adapter stamps correct provenance; git/vitest are driven by injected fakes (no real
 // repo/subprocess), report/capability read the real files/constants.
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gitState } from './git-adapter.js';
 import { listReports, getReport } from './report-adapter.js';
 import { capabilityState } from './capability-adapter.js';
 import { storeState } from './store-adapter.js';
+import { evidenceIndex } from './evidence-adapter.js';
 import { testSuiteRun, lawTestRun } from './test-adapter.js';
 import { JAIL_PREFIX } from '../../layer-5-action/filesystem-executor/filesystem-executor.js';
+import { appendRecord, storeFilePath } from '../../factory-persistence/store.js';
 
 const US = '\x1f';
 const P = (x: { status: string }) => x.status === 'present';
@@ -51,14 +56,47 @@ describe('CapabilityAdapter — imported constants, no drift', () => {
   });
 });
 
-describe('StoreAdapter — honest absent (M3)', () => {
-  it('all three stores are typed absent with a reason', () => {
-    const s = storeState(() => 'ISO');
-    for (const k of ['approvals', 'audit', 'executions'] as const) {
-      expect(s[k].status).toBe('absent');
-      expect(s[k].value).toBeNull();
-      expect(s[k].provenance.source).toBe('absent');
-    }
+describe('StoreAdapter — reads factory-state stores (present-and-empty is truth, present-with-records after a run)', () => {
+  it('an empty/absent store flips to PRESENT-and-empty (count 0, store-file provenance), never absent/mocked', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ece-store-'));
+    try {
+      const s = storeState({ root, now: () => 'ISO' });
+      for (const k of ['approvals', 'audit', 'executions'] as const) {
+        expect(s[k].status).toBe('present');
+        expect(s[k].status === 'present' && s[k].value).toMatchObject({ count: 0, latest: null });
+        expect(s[k].status === 'present' && s[k].provenance.source).toBe('store-file');
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('a store with records flips to present with count + the latest payload, pinned by the tip hash', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ece-store-'));
+    try {
+      const r0 = appendRecord(storeFilePath('approvals', root), { event: 'consumed', approvalId: 'apr_1' });
+      const s = storeState({ root });
+      expect(s.approvals.status === 'present' && s.approvals.value).toMatchObject({ count: 1, latest: { event: 'consumed', approvalId: 'apr_1' } });
+      expect(s.approvals.status === 'present' && s.approvals.provenance.pin).toMatchObject({ kind: 'hash', sha256: r0.hash });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('EvidenceAdapter — reads evidence-index; empty ⇒ present-and-empty; drops malformed records', () => {
+  it('present with the well-formed entries, store-file provenance', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ece-store-'));
+    try {
+      appendRecord(storeFilePath('evidence', root), { kind: 'decision', ref: 'apr_1', usedBy: ['act_1'], atIso: 'i', license: 'ACCEPT' });
+      appendRecord(storeFilePath('evidence', root), { garbage: true }); // malformed ⇒ dropped, not fabricated
+      const ev = evidenceIndex({ root });
+      expect(ev.status).toBe('present');
+      expect(ev.status === 'present' && ev.value.length).toBe(1);
+      expect(ev.status === 'present' && ev.value[0]).toMatchObject({ kind: 'decision', ref: 'apr_1' });
+      expect(ev.status === 'present' && ev.provenance.source).toBe('store-file');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('empty store ⇒ present-and-empty []', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ece-store-'));
+    try { expect(evidenceIndex({ root }).status === 'present' && evidenceIndex({ root }).value).toEqual([]); }
+    finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
 

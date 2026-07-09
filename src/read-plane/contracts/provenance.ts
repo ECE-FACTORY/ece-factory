@@ -8,8 +8,9 @@
 
 import { z } from 'zod';
 
-/** The real read sources. Deliberately excludes 'absent' — a present value can never carry an absent source. */
-export const ProvenanceSource = z.enum(['git', 'report-file', 'test-run', 'source-constant', 'derived']);
+/** The real read sources. Deliberately excludes 'absent' — a present value can never carry an absent source.
+ *  ('store-file' added in M3 — a value read from a factory-state/*.jsonl append-only store.) */
+export const ProvenanceSource = z.enum(['git', 'report-file', 'test-run', 'source-constant', 'store-file', 'derived']);
 export type ProvenanceSource = z.infer<typeof ProvenanceSource>;
 
 /** WHERE the read happened: a file path, a shell command, or a source module export. */

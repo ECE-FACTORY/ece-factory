@@ -8,6 +8,7 @@ import { gitState, type GitAdapterOpts } from '../adapters/git-adapter.js';
 import { listReports, getReport } from '../adapters/report-adapter.js';
 import { capabilityState } from '../adapters/capability-adapter.js';
 import { storeState } from '../adapters/store-adapter.js';
+import { evidenceIndex } from '../adapters/evidence-adapter.js';
 import { testSuiteRun, lawTestRun, type VitestRunner } from '../adapters/test-adapter.js';
 import type { EnvelopeMeta, FactoryStateEnvelope } from '../contracts/index.js';
 
@@ -17,6 +18,8 @@ export interface StateApiDeps {
   now?: () => string;
   gitRun?: GitAdapterOpts['run'];
   docsDir?: string;
+  /** Factory root holding factory-state/*.jsonl (default: cwd). */
+  storeRoot?: string;
   vitestRunner?: VitestRunner;
 }
 
@@ -48,7 +51,8 @@ export function createStateApi(deps: StateApiDeps = {}) {
     if (path === '/state/reports') return env(listReports({ now, docsDir: deps.docsDir }));
     if (path.startsWith('/state/reports/')) return env(getReport(decodeURIComponent(path.slice('/state/reports/'.length)), { now, docsDir: deps.docsDir }));
     if (path === '/state/capabilities') return env(capabilityState(now));
-    if (path === '/state/stores') return env(storeState(now));
+    if (path === '/state/stores') return env(storeState({ now, root: deps.storeRoot }));
+    if (path === '/state/evidence') return env(evidenceIndex({ now, root: deps.storeRoot }));
     if (path === '/state/laws') return cachedRun('laws', () => env(lawTestRun({ head, dirty, now, runner: deps.vitestRunner })));
     if (path === '/state/tests') return cachedRun('tests', () => env(testSuiteRun({ head, dirty, now, runner: deps.vitestRunner })));
     throw new Error(`no route: ${path}`);

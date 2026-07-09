@@ -1,10 +1,16 @@
 // State API — every endpoint returns a valid FactoryStateEnvelope whose data validates against its contract and
 // whose meta.head is the real HEAD. git + vitest are injected fakes (no real repo/subprocess). HEAD-keyed cache
 // is exercised (a second /state/tests hit does not re-invoke the runner on a clean tree).
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createStateApi } from './state-api.js';
-import { GitStateSchema, CapabilityStateSchema, StoreStateSchema, LawTestRunSchema, TestSuiteRunSchema, Run, provenanced } from '../contracts/index.js';
+import { GitStateSchema, CapabilityStateSchema, StoreStateSchema, EvidenceIndexSchema, LawTestRunSchema, TestSuiteRunSchema, Run, provenanced } from '../contracts/index.js';
 import { z } from 'zod';
+
+const tmps: string[] = [];
+afterEach(() => { while (tmps.length) { try { rmSync(tmps.pop()!, { recursive: true, force: true }); } catch { /* best effort */ } } });
 
 const US = '\x1f';
 const gitRun = (cmd: string, dirty = false) => cmd.includes('rev-parse HEAD') ? 'HEADSHA'
@@ -15,7 +21,8 @@ const gitRun = (cmd: string, dirty = false) => cmd.includes('rev-parse HEAD') ? 
 function makeApi(opts: { dirty?: boolean; onRun?: () => void } = {}) {
   let runs = 0;
   const vitestRunner = () => { runs += 1; opts.onRun?.(); return JSON.stringify({ numTotalTests: 2, numPassedTests: 1, numFailedTests: 1, testResults: [{ name: 'x.test.ts', assertionResults: [{ title: 'Prohibition 4a', status: 'passed' }, { title: 'Prohibition 4b', status: 'failed' }] }] }); };
-  const api = createStateApi({ now: () => '2026-07-09T00:00:00.000Z', gitRun: (c) => gitRun(c, opts.dirty), vitestRunner });
+  const storeRoot = mkdtempSync(join(tmpdir(), 'ece-api-')); tmps.push(storeRoot); // isolated empty factory-state
+  const api = createStateApi({ now: () => '2026-07-09T00:00:00.000Z', gitRun: (c) => gitRun(c, opts.dirty), vitestRunner, storeRoot });
   return { api, runCount: () => runs };
 }
 
@@ -28,6 +35,11 @@ describe('State API — envelopes, provenance, cache', () => {
     expect(GitStateSchema.safeParse(api.handle('/state/git').data).success).toBe(true);
     expect(CapabilityStateSchema.safeParse(api.handle('/state/capabilities').data).success).toBe(true);
     expect(StoreStateSchema.safeParse(api.handle('/state/stores').data).success).toBe(true);
+    expect(EvidenceIndexSchema.safeParse(api.handle('/state/evidence').data).success).toBe(true);
+    // stores flip to present-and-empty on an isolated root (present-and-empty is truth, not a mocked record)
+    const stores = api.handle('/state/stores').data as { approvals: { status: string; value: { count: number } } };
+    expect(stores.approvals.status).toBe('present');
+    expect(stores.approvals.value.count).toBe(0);
     expect(LawTestRunSchema.safeParse(api.handle('/state/laws').data).success).toBe(true);
     expect(TestSuiteRunSchema.safeParse(api.handle('/state/tests').data).success).toBe(true);
     expect(z.array(provenanced(Run)).safeParse(api.handle('/state/reports').data).success).toBe(true);

@@ -84,18 +84,21 @@ describe('RULE 0 — the read plane cannot fabricate operational state', () => {
     expect((cap.capabilityState() as { sandboxJailPrefix: { value: string } }).sandboxJailPrefix.value).toBe(JAIL_PREFIX);
   });
 
-  // ── 0.4 — /state/stores returns a TYPED ABSENT (never a mocked record) ─────────────────────────────────
-  //    HONESTLY RED until M2 step 5 (StoreAdapter + State API).
-  it('0.4 — the store state is honest-absent (M3 stores) — value null, source absent, a reason given', async () => {
+  // ── 0.4 — store state is HONEST: present-and-empty when no records, never a mocked record (M3) ──────────
+  //    (M2's absent stub flipped to the M3 StoreAdapter — present-and-empty is truth; a record is never invented.)
+  it('0.4 — the store state is honest: PRESENT-and-empty (count 0, source store-file) when there are no records', async () => {
     const storeFile = join(ADAPTERS, 'store-adapter.ts');
-    expect(existsSync(storeFile), 'StoreAdapter not built yet (M2 step 5)').toBe(true);
+    expect(existsSync(storeFile), 'StoreAdapter must exist').toBe(true);
     const store = await dyn('./adapters/store-adapter.js');
-    const s = store.storeState() as Record<'approvals' | 'audit' | 'executions', { status: string; value: unknown; provenance: { source: string; reason?: string } }>;
-    for (const key of ['approvals', 'audit', 'executions'] as const) {
-      expect(s[key].status).toBe('absent');
-      expect(s[key].value).toBeNull();
-      expect(s[key].provenance.source).toBe('absent');
-      expect(String(s[key].provenance.reason).length).toBeGreaterThan(0);
-    }
+    const os = await import('node:os'); const fs = await import('node:fs'); const nodePath = await import('node:path');
+    const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'ece-04-')); // isolated empty factory-state — deterministic
+    try {
+      const s = store.storeState({ root }) as Record<'approvals' | 'audit' | 'executions', { status: string; value: { count: number; latest: unknown }; provenance: { source: string } }>;
+      for (const key of ['approvals', 'audit', 'executions'] as const) {
+        expect(s[key].status).toBe('present');                 // the store mechanism exists now
+        expect(s[key].value).toMatchObject({ count: 0, latest: null }); // empty is truth, NOT a fabricated record
+        expect(s[key].provenance.source).toBe('store-file');
+      }
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });

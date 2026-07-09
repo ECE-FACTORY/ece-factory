@@ -113,9 +113,15 @@ export const CapabilityStateSchema = z.object({
 });
 export type CapabilityState = z.infer<typeof CapabilityStateSchema>;
 
-/** M3 store snapshot shape (present branch); in M2 all three are `absent`. */
+/** Store snapshot shape (present branch): chain length + the last record's payload (null when empty). */
 export const StoreSnapshot = z.object({ count: z.number(), latest: z.unknown().nullable() });
 export type StoreSnapshot = z.infer<typeof StoreSnapshot>;
+
+/** A read-view of one evidence-index record (a light mirror — the read plane does not import factory-persistence). */
+export const EvidenceEntry = z.object({ kind: z.string(), ref: z.string(), sha256: z.string().optional(), usedBy: z.array(z.string()), atIso: z.string() });
+export type EvidenceEntry = z.infer<typeof EvidenceEntry>;
+export const EvidenceIndexSchema = provenanced(z.array(EvidenceEntry));
+export type EvidenceIndex = z.infer<typeof EvidenceIndexSchema>;
 
 export const StoreStateSchema = z.object({
   approvals: provenanced(StoreSnapshot),
