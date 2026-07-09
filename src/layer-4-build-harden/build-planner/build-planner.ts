@@ -65,6 +65,19 @@ export interface ApprovedBuildDecision {
     readonly measuredBy: string;
     readonly gateActionId: string;
   };
+  /**
+   * OPTIONAL, ADDITIVE (Phase: subscription promotion seam). The human's MEASURED multi-tenancy assessment that
+   * promoted this spine EXTEND→FORK under SUBSCRIPTION mode — the one subscription dimension the machine never
+   * measures. Populated by the Layer-2 subscription-decision-seam; the planner does not read it. `gateActionId`
+   * is the REAL approved gate action id — never a placeholder. A decision carries EXACTLY ONE of
+   * `airGapAssessment` (sovereign) / `multiTenancyAssessment` (subscription), identifying which lens promoted it.
+   */
+  readonly multiTenancyAssessment?: {
+    readonly value: 'full' | 'partial' | 'none';
+    readonly rationale: string;
+    readonly measuredBy: string;
+    readonly gateActionId: string;
+  };
 }
 
 /** How faithful a section of the plan is: a real plan we can act on, or a placeholder for a later slice. */

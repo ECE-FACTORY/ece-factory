@@ -483,6 +483,63 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     expect(/mode === 'sovereign'/.test(orch)).toBe(true);
   });
 
+  // ── Prohibition 4k (added additively) — the Layer-2 SUBSCRIPTION PROMOTION SEAM cannot self-approve a build ─
+  // subscription-decision-seam.ts is the subscription-mode analog of the sovereign build-decision seam: it turns
+  // an APPROVED subscription harvest proposal into an ApprovedBuildDecision by folding a human MULTI-TENANCY
+  // measurement. It must obey the SAME token discipline, and — being a SEPARATE FILE — needs its own per-file
+  // freeze (4i reads build-decision-seam.ts by path and cannot see a second file). This is a VERBATIM MIRROR of
+  // 4i retargeted to the subscription seam: MINTS NOTHING, the ApprovedBuildDecision is constructed at EXACTLY
+  // ONE site inside `approvalWrite(approval: ConsumedApproval)`, the token TYPE comes from the governed-adapter
+  // CONTRACT (never the transport's token/mint), it routes through the REAL ClassDispatcher, and holds no
+  // node:fs / real-write. Net: no branded token ⇒ STOP_FOR_APPROVAL ⇒ no decision. Purely ADDITIVE — changes
+  // NONE of the assertions above (4i still proves the identical property for the sovereign seam).
+  it('Prohibition 4k — the Layer-2 subscription promotion seam mints nothing, forges nothing, and constructs the ApprovedBuildDecision ONLY inside the token-gated approvalWrite handler', () => {
+    const seamRaw = readFileSync(
+      join(SRC, 'layer-2-command', 'subscription-decision-seam', 'subscription-decision-seam.ts'), 'utf8');
+    const seam = stripComments(seamRaw);
+
+    // 1. TOKEN TYPE comes from the CONTRACT, not the transport. The governed-adapter import brings ConsumedApproval;
+    //    the tool-classes import brings the runtime dispatcher/bridge ONLY — never the token/mint/brand.
+    const contractImport = /import\s*\{([^}]*)\}\s*from\s*['"][^'"]*governed-adapter\/governed-adapter\.js['"]/s.exec(seamRaw);
+    expect(contractImport).not.toBeNull();
+    expect(/\bConsumedApproval\b/.test(contractImport![1])).toBe(true);
+    const bridgeImport = /import\s*\{([^}]*)\}\s*from\s*['"][^'"]*mcp-bridge\/tool-classes\.js['"]/s.exec(seamRaw);
+    expect(bridgeImport).not.toBeNull();
+    expect(/\bClassDispatcher\b/.test(bridgeImport![1])).toBe(true);   // it DOES use the real dispatcher...
+    expect(/\bConsumedApproval\b/.test(bridgeImport![1])).toBe(false); // ...but NOT the token type from the transport
+    expect(/\bmintConsumedApproval\b/.test(bridgeImport![1])).toBe(false);
+    expect(/\bAPPROVAL_BRAND\b/.test(bridgeImport![1])).toBe(false);
+
+    // 2. MINTS NOTHING — no named mint, no `mint…(` call, and the brand symbol is never named anywhere.
+    expect(/\bmintConsumedApproval\b/.test(seam)).toBe(false);
+    expect(/\bmintExternalCapability\b/.test(seam)).toBe(false);
+    expect(/\bmint[A-Za-z]*\s*\(/.test(seam)).toBe(false);
+    expect(/\bAPPROVAL_BRAND\b/.test(seam)).toBe(false);
+
+    // 3. NO FORGERY BY CAST — the token/decision are never conjured with a type assertion.
+    expect(/as\s+ConsumedApproval\b/.test(seam)).toBe(false);
+    expect(/as\s+ApprovedBuildDecision\b/.test(seam)).toBe(false);
+
+    // 4. EXACTLY ONE construction of the decision, INSIDE the approvalWrite handler. `approvedBy:` is a field only
+    //    the ApprovedBuildDecision literal carries; it appears once, after the single approvalWrite callback opens.
+    expect((seam.match(/\bapprovalWrite:/g) ?? []).length).toBe(1);
+    expect((seam.match(/\bapprovedBy:/g) ?? []).length).toBe(1);
+    expect(seam.indexOf('approvedBy:')).toBeGreaterThan(seam.indexOf('approvalWrite:')); // constructed inside the handler
+    // the handler is explicitly typed to receive the branded token — it is the only way in.
+    expect(/approvalWrite:\s*async\s*\(approval:\s*ConsumedApproval\)/.test(seam)).toBe(true);
+
+    // 5. ROUTES THROUGH THE REAL DISPATCHER for the write tier — re-implements no consume/mint.
+    expect(/\bdispatch\b/.test(seam)).toBe(true);
+    expect(/'APPROVAL_REQUIRED_WRITE'/.test(seam)).toBe(true);
+
+    // 6. Imports NO node:fs and holds NO real-write call — it assembles a decision, it does not write.
+    expect(/from\s*['"]node:fs(\/promises)?['"]/.test(seam)).toBe(false);
+    expect(/from\s*['"]fs(\/promises)?['"]/.test(seam)).toBe(false);
+    for (const re of [/\bwriteFile\s*\(/, /\bmkdir\s*\(/, /\brm\s*\(/, /\bopenSync\s*\(/, /\bappendFile\s*\(/, /\bcreateWriteStream\s*\(/]) {
+      expect({ pattern: String(re), hit: re.test(seam) }).toEqual({ pattern: String(re), hit: false });
+    }
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven
