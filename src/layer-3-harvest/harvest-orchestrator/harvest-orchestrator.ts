@@ -75,7 +75,7 @@ export interface OrchestratorOptions { now?: () => number; maxPerSubDomain?: num
 
 /** How one dimension's scout-signal influenced the score, under the confidence contract — fully traceable. */
 export interface DimensionEnrichment {
-  dimension: 'maintainability' | 'architecture' | 'air-gap' | 'white-label';
+  dimension: 'maintainability' | 'architecture' | 'air-gap' | 'white-label' | 'cloud-native' | 'billing-hooks' | 'multi-tenancy';
   confidence: Confidence;
   value: string;
   /** 'raised' — measured evidence lifted the sub-score at full weight; 'bounded' — a partial signal lifted it
@@ -267,13 +267,15 @@ export function enrichScore(
   const extra: {
     archFit?: { rating: ArchFitRating; note?: string };
     maintainability?: { rating: 'clean' | 'maintainable' | 'hard' | 'unsafe'; note?: string };
+    cloudNative?: 'strong' | 'partial' | 'poor';
+    billingHooks?: 'native' | 'integratable' | 'none';
   } = {};
 
-  // MAINTAINABILITY — 'measured' MAY raise at full weight; anything else stays deny-by-default.
+  // MAINTAINABILITY — 'measured' MAY raise at full weight; anything else stays deny-by-default. (Both modes.)
   if (signals.maintainability.confidence === 'measured' && signals.maintainability.value !== 'unknown') {
     extra.maintainability = { rating: signals.maintainability.value, note: enrichNote('measured', signals.maintainability.evidence) };
   }
-  // ARCHITECTURE — 'measured' at full weight; 'partial' bounded to ≤ 'possible'; else deny-by-default.
+  // ARCHITECTURE — 'measured' at full weight; 'partial' bounded to ≤ 'possible'; else deny-by-default. (Both modes.)
   if (signals.architecture.value !== 'unknown') {
     if (signals.architecture.confidence === 'measured') {
       extra.archFit = { rating: signals.architecture.value, note: enrichNote('measured', signals.architecture.evidence) };
@@ -281,8 +283,19 @@ export function enrichScore(
       extra.archFit = { rating: boundPartialArch(signals.architecture.value), note: enrichNote('partial→bounded', signals.architecture.evidence) };
     }
   }
-  // AIR-GAP + WHITE-LABEL — deliberately NOT passed: they remain the record's deny-by-default 'unknown' (0).
-  // A found cloud blocker (air-gap 'no') is surfaced as evidence in the trace but never lifts the score.
+  // SOVEREIGN: AIR-GAP + WHITE-LABEL are deliberately NOT passed — they stay the record's deny-by-default (0),
+  // surfaced as evidence but never lifting the score (human-assessed). Sovereign folding is UNCHANGED.
+  if (mode === 'subscription') {
+    // CLOUD-NATIVE — folded ONLY when the scout MEASURED present artifacts (never a 'poor' inferred from absence).
+    if (signals.cloudNative.confidence === 'measured' && signals.cloudNative.value !== 'unknown') {
+      extra.cloudNative = signals.cloudNative.value;
+    }
+    // BILLING — the scout emits at most 'partial' ('integratable'); a dep proves a hook exists, not 'native'.
+    if (signals.billingHooks.confidence !== 'not-mechanizable' && signals.billingHooks.value !== 'unknown') {
+      extra.billingHooks = signals.billingHooks.value;
+    }
+    // MULTI-TENANCY — the scout is ALWAYS not-mechanizable ⇒ NEVER folded here; it stays deny-by-default for a human.
+  }
 
   const score = scoreCandidate(candidateFromScoringInputs(inputs, extra), mode);
   return {
@@ -292,7 +305,7 @@ export function enrichScore(
       status: 'OK',
       totalBefore: baseScore.total, totalAfter: score.total,
       bandBefore: baseScore.band, bandAfter: score.band,
-      dimensions: buildDimensionTrace(baseScore, score, signals),
+      dimensions: buildDimensionTrace(baseScore, score, signals, mode),
     },
   };
 }
@@ -301,19 +314,27 @@ function subScoreByDim(s: ScoreResult): Record<string, number> {
   return Object.fromEntries(s.subScores.map((x) => [x.dimension, x.score]));
 }
 
-/** Build the per-dimension before/after audit rows — the ONLY basis on which a verdict may be said to move. */
-function buildDimensionTrace(base: ScoreResult, enriched: ScoreResult, signals: RepoSignals): DimensionEnrichment[] {
+/** Build the per-dimension before/after audit rows — the ONLY basis on which a verdict may be said to move.
+ *  Mode-aware: the SOVEREIGN rows (and their order) are byte-identical to before the switch; subscription lists
+ *  its own dimensions instead of air-gap/white-label. */
+function buildDimensionTrace(base: ScoreResult, enriched: ScoreResult, signals: RepoSignals, mode: ProductMode): DimensionEnrichment[] {
   const b = subScoreByDim(base), e = subScoreByDim(enriched);
   const row = (dimension: DimensionEnrichment['dimension'], key: string, sig: { value: unknown; confidence: Confidence; evidence: string[] }): DimensionEnrichment => {
     const before = b[key] ?? 0, after = e[key] ?? 0;
     const influence: DimensionEnrichment['influence'] = after > before ? (sig.confidence === 'measured' ? 'raised' : 'bounded') : 'none';
     return { dimension, confidence: sig.confidence, value: String(sig.value), influence, pointsBefore: before, pointsAfter: after, evidence: sig.evidence };
   };
-  return [
+  const universal = [
     row('maintainability', 'maintainability', signals.maintainability),
     row('architecture', 'arch-fit', signals.architecture),
-    row('air-gap', 'air-gap', signals.airGap),
-    row('white-label', 'white-label', signals.whiteLabel),
+  ];
+  if (mode === 'sovereign') {
+    return [...universal, row('air-gap', 'air-gap', signals.airGap), row('white-label', 'white-label', signals.whiteLabel)];
+  }
+  return [...universal,
+    row('cloud-native', 'cloud-native', signals.cloudNative),
+    row('billing-hooks', 'billing-hooks', signals.billingHooks),
+    row('multi-tenancy', 'multi-tenancy', signals.multiTenancy),
   ];
 }
 

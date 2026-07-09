@@ -6,8 +6,70 @@ import { describe, it, expect } from 'vitest';
 import {
   RepoScoutSignals,
   deriveMaintainability, deriveArchitecture, deriveAirGap, deriveWhiteLabel,
+  deriveCloudNative, deriveBillingHooks, deriveMultiTenancy,
   parseManifestDeps, detectCloudBlockers, analyzeTree, parseLastPage, daysSince,
+  analyzeCloudNativeTree, detectCloudNativeSdks, detectBillingSdks, tenantHintsFromTree,
 } from './repo-scout-signals.js';
+
+// ── Subscription-mode dimensions: the honesty contract — NOTHING is 'measured' from ABSENCE ────────────────
+describe('confidence contract — cloud-native (measured ONLY from present artifacts; never "poor" from absence)', () => {
+  it('Dockerfile + orchestration ⇒ strong, MEASURED', () => {
+    expect(deriveCloudNative({ hasDockerfile: true, hasCompose: false, hasOrchestration: true, cloudSdks: [] })).toMatchObject({ value: 'strong', confidence: 'measured' });
+  });
+  it('Dockerfile only (no orchestration) ⇒ partial, MEASURED', () => {
+    expect(deriveCloudNative({ hasDockerfile: true, hasCompose: false, hasOrchestration: false, cloudSdks: [] })).toMatchObject({ value: 'partial', confidence: 'measured' });
+  });
+  it('cloud infra SDK only ⇒ partial, MEASURED', () => {
+    expect(deriveCloudNative({ hasDockerfile: false, hasCompose: false, hasOrchestration: false, cloudSdks: ['AWS SDK'] })).toMatchObject({ value: 'partial', confidence: 'measured' });
+  });
+  it('NOTHING found ⇒ not-mechanizable/unknown — NEVER "poor" (absence is not proof)', () => {
+    const s = deriveCloudNative({ hasDockerfile: false, hasCompose: false, hasOrchestration: false, cloudSdks: [] });
+    expect(s).toMatchObject({ value: 'unknown', confidence: 'not-mechanizable' });
+    expect(s.value).not.toBe('poor');
+    expect(s.confidence).not.toBe('measured');
+  });
+});
+
+describe('confidence contract — billing (partial from a dep; NEVER native/measured from a dep alone)', () => {
+  it('billing SDK present ⇒ integratable, PARTIAL (a dep proves a hook exists, not subscription-grade)', () => {
+    const s = deriveBillingHooks({ billingSdks: ['Stripe'] });
+    expect(s).toMatchObject({ value: 'integratable', confidence: 'partial' });
+    expect(s.value).not.toBe('native');
+    expect(s.confidence).not.toBe('measured');
+  });
+  it('no billing SDK ⇒ not-mechanizable/unknown — NEVER "none" from absence', () => {
+    const s = deriveBillingHooks({ billingSdks: [] });
+    expect(s).toMatchObject({ value: 'unknown', confidence: 'not-mechanizable' });
+    expect(s.value).not.toBe('none');
+  });
+});
+
+describe('confidence contract — multi-tenancy (ALWAYS not-mechanizable; the subscription analog of air-gap)', () => {
+  it('no hints ⇒ not-mechanizable/unknown', () => {
+    expect(deriveMultiTenancy({ tenantHints: [] })).toMatchObject({ value: 'unknown', confidence: 'not-mechanizable' });
+  });
+  it('EVEN WITH tenant hints ⇒ still not-mechanizable, hints noted but never scored/measured', () => {
+    const s = deriveMultiTenancy({ tenantHints: ['src/tenant/isolation.ts', 'db/multitenant.sql'] });
+    expect(s).toMatchObject({ value: 'unknown', confidence: 'not-mechanizable' });
+    expect(s.evidence.join(' ')).toMatch(/weak hints only \(NOT scored\)/);
+  });
+});
+
+describe('subscription-dimension analyzers/detectors (pure)', () => {
+  it('analyzeCloudNativeTree detects Dockerfile / compose / k8s+helm; empty tree ⇒ all false', () => {
+    expect(analyzeCloudNativeTree(['Dockerfile', 'docker-compose.yml', 'k8s/deployment.yaml', 'helm/Chart.yaml'])).toEqual({ hasDockerfile: true, hasCompose: true, hasOrchestration: true });
+    expect(analyzeCloudNativeTree(['src/index.ts', 'README.md'])).toEqual({ hasDockerfile: false, hasCompose: false, hasOrchestration: false });
+  });
+  it('detectCloudNativeSdks / detectBillingSdks find named deps; absence ⇒ empty (no fabrication)', () => {
+    expect(detectCloudNativeSdks(['@aws-sdk/client-s3'], '')).toContain('AWS SDK');
+    expect(detectCloudNativeSdks(['lodash'], '')).toEqual([]);
+    expect(detectBillingSdks(['stripe'], '')).toContain('Stripe');
+    expect(detectBillingSdks(['lodash'], '')).toEqual([]);
+  });
+  it('tenantHintsFromTree collects weak path hints only', () => {
+    expect(tenantHintsFromTree(['src/tenant/x.ts', 'README.md'])).toEqual(['src/tenant/x.ts']);
+  });
+});
 
 describe('confidence contract — maintainability (always measured from real facts)', () => {
   it('recent + many contributors + CI + tests ⇒ clean', () => {

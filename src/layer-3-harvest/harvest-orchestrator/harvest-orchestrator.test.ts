@@ -9,7 +9,7 @@ import {
 } from './harvest-orchestrator.js';
 import type { ScoutPort, GradedCandidate, SignalsScoutPort } from './harvest-orchestrator.js';
 import type { ScoutResult, ScoutedCandidate } from '../repo-scout/repo-scout.js';
-import type { RepoEvaluationRecord, LicenseDecision, ScoringInputs, AirGapSuitability, WhiteLabelFit } from '../repo-intelligence/repo-intelligence.js';
+import type { RepoEvaluationRecord, LicenseDecision, ScoringInputs, AirGapSuitability, WhiteLabelFit, MultiTenancy, BillingHooks, CloudNative } from '../repo-intelligence/repo-intelligence.js';
 import { scoreCandidate, candidateFromScoringInputs } from '../scoring-engine/scoring-engine.js';
 import type { ScoreResult, ScoreBand, MaintainabilityRating, ArchFitRating } from '../scoring-engine/scoring-engine.js';
 import type { RepoSignals, Confidence } from '../repo-scout-signals/repo-scout-signals.js';
@@ -273,6 +273,9 @@ function okSignals(owner: string, name: string, o: {
   maint?: [MaintainabilityRating | 'unknown', Confidence];
   arch?: [ArchFitRating | 'unknown', Confidence];
   airGap?: [AirGapSuitability, Confidence];
+  cloudNative?: [CloudNative, Confidence];
+  billingHooks?: [BillingHooks, Confidence];
+  multiTenancy?: [MultiTenancy, Confidence];
 } = {}): RepoSignals {
   return {
     status: 'OK', target: { owner, name, branch: 'main' },
@@ -280,6 +283,10 @@ function okSignals(owner: string, name: string, o: {
     architecture: sig<ArchFitRating | 'unknown'>(o.arch?.[0] ?? 'good', o.arch?.[1] ?? 'measured', ['primary language TypeScript', '42 direct dependencies', 'modular layout (packages/modules/apps dirs)']),
     airGap: sig<AirGapSuitability>(o.airGap?.[0] ?? 'partial', o.airGap?.[1] ?? 'partial', ['no hard cloud/SaaS dependency found in the manifest', 'PARTIAL BY NATURE: absence of evidence is not proof']),
     whiteLabel: sig<WhiteLabelFit>('unknown', 'not-mechanizable', ['rebrandability is an architectural/legal judgment — NOT MECHANIZABLE']),
+    // Subscription dims — default deny-by-default (not-mechanizable) so SOVEREIGN tests are unaffected.
+    cloudNative: sig<CloudNative>(o.cloudNative?.[0] ?? 'unknown', o.cloudNative?.[1] ?? 'not-mechanizable', ['(fixture) cloud-native']),
+    billingHooks: sig<BillingHooks>(o.billingHooks?.[0] ?? 'unknown', o.billingHooks?.[1] ?? 'not-mechanizable', ['(fixture) billing hooks']),
+    multiTenancy: sig<MultiTenancy>(o.multiTenancy?.[0] ?? 'unknown', o.multiTenancy?.[1] ?? 'not-mechanizable', ['(fixture) multi-tenancy — human-assessed']),
   };
 }
 function failClosedSignals(owner: string, name: string, reason = 'no GITHUB_TOKEN — signals scout refuses to source (fail-closed)'): RepoSignals {
@@ -290,6 +297,9 @@ function failClosedSignals(owner: string, name: string, reason = 'no GITHUB_TOKE
     architecture: sig<ArchFitRating | 'unknown'>('unknown', 'not-mechanizable', ev),
     airGap: sig<AirGapSuitability>('unknown', 'not-mechanizable', ev),
     whiteLabel: sig<WhiteLabelFit>('unknown', 'not-mechanizable', ev),
+    cloudNative: sig<CloudNative>('unknown', 'not-mechanizable', ev),
+    billingHooks: sig<BillingHooks>('unknown', 'not-mechanizable', ev),
+    multiTenancy: sig<MultiTenancy>('unknown', 'not-mechanizable', ev),
   };
 }
 function fakeSignals(byRepo: Record<string, RepoSignals>, opts: { throwFor?: string } = {}): SignalsScoutPort {
@@ -455,5 +465,63 @@ describe('Harvest Orchestrator — full run() WITH signals port (enrichment shar
     expect(clm.spine!.score.total).toBe(78.5);       // 51/65×100 — bounded partial arch (6) + measured maint (7)
     expect(clm.decision).toBe('EXTEND');
     expect(clm.decisionEvidence.join(' ')).toMatch(/air-gap UNMEASURED/); // FORK still needs a human air-gap assessment
+  });
+});
+
+// ── STAGE 3 — SUBSCRIPTION MODE: ignores air-gap, gates on multi-tenancy ───────────────────────────────────
+describe('Harvest Orchestrator — SUBSCRIPTION mode scoring + gate', () => {
+  // A real subscription-scored spine. multiTenancy is the caller-supplied (human) value; cloud/billing pre-folded.
+  function subSpine(mt: MultiTenancy): GradedCandidate {
+    const sc = scoreCandidate({
+      license: { decision: 'ACCEPT', detected: 'MIT' }, maturity: { stars: 2000, activelyMaintained: true },
+      archFit: { rating: 'strong' }, maintainability: { rating: 'clean' },
+      multiTenancy: mt, cloudNative: 'strong', billingHooks: 'native',
+    }, 'subscription');
+    return gcWith(sc);
+  }
+
+  it('subscription profile scores its own dims and has NO air-gap sub-score at all', () => {
+    const dims = subSpine('full').score.subScores.map((s) => s.dimension);
+    expect(dims).toEqual(expect.arrayContaining(['multi-tenancy', 'billing-hooks', 'cloud-native']));
+    expect(dims).not.toContain('air-gap');
+    expect(dims).not.toContain('white-label');
+  });
+
+  it('subscription FORK requires MULTI-TENANCY measured (air-gap is irrelevant)', () => {
+    expect(decideSourcing([subSpine('full')], 'subscription').decision).toBe('FORK');            // tenancy measured ⇒ FORK
+    const un = decideSourcing([subSpine('unknown')], 'subscription');
+    expect(un.decision).toBe('EXTEND');                                                          // tenancy unmeasured ⇒ never FORK
+    expect(un.decision).not.toBe('FORK');
+    expect(un.evidence.join(' ')).toMatch(/multi-tenancy UNMEASURED/);
+    expect(un.evidence.join(' ')).toMatch(/HUMAN APPROVAL REQUIRED: multi-tenancy/);
+  });
+
+  it('MODE CONFUSION fails closed — a subscription-scored spine through SOVEREIGN decideSourcing cannot FORK', () => {
+    // The subscription spine has no air-gap sub-score, so the sovereign air-gap gate finds nothing measured.
+    const r = decideSourcing([subSpine('full')], 'sovereign');
+    expect(r.decision).not.toBe('FORK');
+  });
+
+  it('real run(domain, "subscription") stamps the mode, folds cloud-native/billing, leaves multi-tenancy for a human', async () => {
+    const subs = decomposeLegalContractOps();
+    const mit = () => [mkCandidate({ owner: 'acme', name: 'clm', licenseText: MIT_TEXT, verified: true, hint: 'MIT', fromText: 'MIT', stars: 4200, activelyMaintained: true })];
+    const scoutByQuery: Record<string, ScoutResult> = {};
+    for (const s of subs) scoutByQuery[s.query] = ok(s.query, mit());
+    const signals = fakeSignals({ 'acme/clm': okSignals('acme', 'clm', { cloudNative: ['strong', 'measured'], billingHooks: ['integratable', 'partial'] }) });
+    const orch = new HarvestOrchestrator(fakeScout(scoutByQuery), { now: FIXED_NOW, signalsPort: signals });
+
+    const res = await orch.run('Legal & Contract Operations', 'subscription');
+    expect(res.report!.productMode).toBe('subscription');
+    expect(res.reportMarkdown!).toContain('**Product mode:** SUBSCRIPTION');
+    const clm = res.report!.subDomains.find((r) => r.subDomain.key === 'contract-lifecycle')!;
+    const dims = clm.spine!.score.subScores;
+    // cloud-native + billing were MEASURED/folded; air-gap is not even a dimension here.
+    expect(dims.find((s) => s.dimension === 'cloud-native')!.measured).toBe(true);
+    expect(dims.find((s) => s.dimension === 'billing-hooks')!.measured).toBe(true);
+    expect(dims.some((s) => s.dimension === 'air-gap')).toBe(false);
+    // multi-tenancy stays deny-by-default (the scout never mechanizes it) ⇒ EXTEND, flagged for a human.
+    expect(dims.find((s) => s.dimension === 'multi-tenancy')!.measured).toBe(false);
+    expect(clm.decision).toBe('EXTEND');
+    expect(clm.decisionEvidence.join(' ')).toMatch(/multi-tenancy UNMEASURED/);
   });
 });

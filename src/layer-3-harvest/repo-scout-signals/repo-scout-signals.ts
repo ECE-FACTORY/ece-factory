@@ -20,6 +20,17 @@
 //   4. WHITE-LABEL FIT  → 'not-mechanizable' — rebrandability is an architectural/legal judgment. Weak
 //                         signals may be noted, but the confidence stays not-mechanizable; no fabricated score.
 //
+// SUBSCRIPTION-MODE DIMENSIONS (product-mode switch) — sourced from the SAME fetched tree/manifest, NO extra
+// network calls, and held to the same honesty contract (nothing 'measured' from ABSENCE):
+//   5. CLOUD-NATIVE     → 'measured' ONLY from PRESENT deployment artifacts (Dockerfile/compose/k8s/helm/cloud
+//                         infra SDK). Absence proves nothing ⇒ 'not-mechanizable' (never a 'poor' from absence).
+//   6. BILLING HOOKS    → 'partial' ('integratable') when a billing/subscription SDK dependency is present — a
+//                         dep proves a hook EXISTS, not that it is subscription-grade. 'native'/'measured' are
+//                         NEVER emitted from a dep alone (human confirmation only). Absence ⇒ 'not-mechanizable'.
+//   7. MULTI-TENANCY    → 'not-mechanizable' ALWAYS. Tenant isolation is a design/data-model property no read-
+//                         only signal certifies (the subscription analog of air-gap). Weak hints noted, never
+//                         scored — a human folds the measured value (foldMultiTenancyMeasurement).
+//
 // TOKEN + NETWORK: same discipline as repo-scout. The token is read only from the constructor, held in a
 // private #token field, used ONLY in the Authorization header, and NEVER logged/emitted/redacted-into-output.
 // All network egress lives HERE. No token / unreachable ⇒ FAIL CLOSED: every dimension 'not-mechanizable'
@@ -29,7 +40,7 @@
 
 import { normalizeGithubToken } from '../../factory-shared/github-token/github-token.js';
 import type { ArchFitRating, MaintainabilityRating } from '../scoring-engine/scoring-engine.js';
-import type { AirGapSuitability, WhiteLabelFit } from '../repo-intelligence/repo-intelligence.js';
+import type { AirGapSuitability, WhiteLabelFit, MultiTenancy, BillingHooks, CloudNative } from '../repo-intelligence/repo-intelligence.js';
 
 // ── Public shapes ────────────────────────────────────────────────────────────────────────────────────
 
@@ -57,6 +68,10 @@ export interface RepoSignals {
   architecture: DimensionSignal<ArchFitRating | 'unknown'>;
   airGap: DimensionSignal<AirGapSuitability>;
   whiteLabel: DimensionSignal<WhiteLabelFit>;
+  // Subscription-mode dimensions (folded only under subscription mode; sourced without extra network calls).
+  cloudNative: DimensionSignal<CloudNative>;
+  billingHooks: DimensionSignal<BillingHooks>;
+  multiTenancy: DimensionSignal<MultiTenancy>;
   reason?: string; // set on FAILED_CLOSED
 }
 
@@ -93,6 +108,18 @@ export interface AirGapFacts {
 export interface WhiteLabelFacts {
   brandingHits: string[]; // weak signals only (trademark files, hardcoded product strings)
 }
+export interface CloudNativeFacts {
+  hasDockerfile: boolean;
+  hasCompose: boolean;
+  hasOrchestration: boolean; // k8s / helm / kustomize manifests
+  cloudSdks: string[];       // cloud INFRA SDKs found in the manifest (present evidence, not telemetry)
+}
+export interface BillingFacts {
+  billingSdks: string[];     // billing/subscription SDK deps found in the manifest
+}
+export interface MultiTenancyFacts {
+  tenantHints: string[];     // WEAK path/name hints only — never scored
+}
 
 // ── Config: cloud / SaaS / phone-home dependency patterns (read-only heuristics) ───────────────────────
 
@@ -105,6 +132,30 @@ export const CLOUD_DEP_PATTERNS: { re: RegExp; label: string }[] = [
   { re: /segment|mixpanel|amplitude|analytics/i, label: 'product analytics / telemetry' },
   { re: /auth0|okta|@clerk/i, label: 'hosted identity (Auth0/Okta/Clerk)' },
   { re: /twilio|sendgrid|mailgun|@sendgrid/i, label: 'hosted comms (Twilio/SendGrid/Mailgun)' },
+];
+
+// Cloud INFRA SDK patterns — PRESENT evidence of cloud-native orientation (a focused subset; note the deliberate
+// sign inversion: several of these ALSO count as air-gap blockers above — the same dep hurts sovereign air-gap and
+// helps subscription cloud-native, which is exactly the two-lens point).
+export const CLOUD_NATIVE_DEP_PATTERNS: { re: RegExp; label: string }[] = [
+  { re: /aws-sdk|@aws-sdk|\bboto3\b|\baioboto/i, label: 'AWS SDK' },
+  { re: /@google-cloud|googleapis/i, label: 'Google Cloud SDK' },
+  { re: /@azure|\bazure-/i, label: 'Azure SDK' },
+  { re: /kubernetes-client|@kubernetes\b|\bclient-go\b/i, label: 'Kubernetes client' },
+  { re: /\bserverless\b|aws-lambda|@vercel|@netlify/i, label: 'serverless framework' },
+  { re: /\bterraform\b|\bpulumi\b/i, label: 'IaC (Terraform/Pulumi)' },
+];
+
+// Billing / subscription SDK patterns — PRESENT evidence a billing hook EXISTS (never proof of subscription-grade).
+export const BILLING_DEP_PATTERNS: { re: RegExp; label: string }[] = [
+  { re: /\bstripe\b|@stripe/i, label: 'Stripe' },
+  { re: /braintree/i, label: 'Braintree' },
+  { re: /chargebee/i, label: 'Chargebee' },
+  { re: /\brecurly\b/i, label: 'Recurly' },
+  { re: /\bpaddle\b/i, label: 'Paddle' },
+  { re: /lemonsqueezy|lemon-squeezy/i, label: 'Lemon Squeezy' },
+  { re: /razorpay/i, label: 'Razorpay' },
+  { re: /paypal-rest-sdk|@paypal/i, label: 'PayPal' },
 ];
 
 // ── Pure derivations (unit-testable with NO network) ───────────────────────────────────────────────────
@@ -168,6 +219,42 @@ export function deriveWhiteLabel(f: WhiteLabelFacts): DimensionSignal<WhiteLabel
   return { value: 'unknown', confidence: 'not-mechanizable', evidence };
 }
 
+/** CLOUD-NATIVE — 'measured' ONLY from PRESENT deployment artifacts. Absence is NOT proof of 'poor' ⇒ deny-by-default. */
+export function deriveCloudNative(f: CloudNativeFacts): DimensionSignal<CloudNative> {
+  const container = f.hasDockerfile || f.hasCompose;
+  const cloudSdk = f.cloudSdks.length > 0;
+  if (!container && !f.hasOrchestration && !cloudSdk) {
+    return { value: 'unknown', confidence: 'not-mechanizable', evidence: ['no Dockerfile / compose / k8s / helm / cloud-infra SDK found — cloud-native fitness cannot be judged from read-only artifacts (ABSENCE IS NOT PROOF OF "poor")'] };
+  }
+  const evidence: string[] = [];
+  if (f.hasDockerfile) evidence.push('Dockerfile present');
+  if (f.hasCompose) evidence.push('docker-compose present');
+  if (f.hasOrchestration) evidence.push('k8s/helm/kustomize manifests present');
+  if (cloudSdk) evidence.push(`cloud infra SDK(s): ${f.cloudSdks.join(', ')}`);
+  // STRONG requires a container AND orchestration (real multi-instance deploy evidence). Otherwise PARTIAL.
+  const value: CloudNative = container && f.hasOrchestration ? 'strong' : 'partial';
+  evidence.push('MEASURED from PRESENT deployment artifacts — "poor" is never emitted from absence');
+  return { value, confidence: 'measured', evidence };
+}
+
+/** BILLING HOOKS — 'partial' ('integratable') when a billing SDK dep is present. NEVER 'native'/'measured' from a dep. */
+export function deriveBillingHooks(f: BillingFacts): DimensionSignal<BillingHooks> {
+  if (f.billingSdks.length === 0) {
+    return { value: 'unknown', confidence: 'not-mechanizable', evidence: ['no billing/subscription SDK dependency found — ABSENCE IS NOT PROOF OF "none"; billing readiness needs human assessment'] };
+  }
+  return {
+    value: 'integratable', confidence: 'partial',
+    evidence: [`billing/subscription SDK dependency found: ${f.billingSdks.join(', ')}`, 'PARTIAL: a dependency proves a billing hook EXISTS, not that it is subscription-grade — "native" is a human confirmation, never emitted from a dep'],
+  };
+}
+
+/** MULTI-TENANCY — ALWAYS 'not-mechanizable' (the subscription analog of air-gap). Weak hints noted, never scored. */
+export function deriveMultiTenancy(f: MultiTenancyFacts): DimensionSignal<MultiTenancy> {
+  const evidence = ['tenant isolation is a design/data-model property — NOT MECHANIZABLE from read-only signals; a human must assess it (the subscription analog of air-gap)'];
+  if (f.tenantHints.length > 0) evidence.push(`weak hints only (NOT scored): ${f.tenantHints.slice(0, 5).join(', ')}`);
+  return { value: 'unknown', confidence: 'not-mechanizable', evidence };
+}
+
 // ── Pure parsers/analyzers over fetched text (unit-testable with NO network) ────────────────────────────
 
 /** Count direct dependencies + collect their names from a manifest. Best-effort per ecosystem. */
@@ -218,6 +305,38 @@ export function analyzeTree(paths: string[]): { hasTests: boolean; hasCI: boolea
   return { hasTests, hasCI, modular };
 }
 
+/** Detect PRESENT cloud-native deployment artifacts in a repo tree (files only — never inferred from absence). */
+export function analyzeCloudNativeTree(paths: string[]): { hasDockerfile: boolean; hasCompose: boolean; hasOrchestration: boolean } {
+  const hasDockerfile = paths.some((p) => /(^|\/)(Dockerfile|Containerfile)(\.[\w.-]+)?$/i.test(p));
+  const hasCompose = paths.some((p) => /(^|\/)(docker-)?compose(\.[\w.-]+)?\.ya?ml$/i.test(p));
+  const hasOrchestration = paths.some((p) =>
+    /(^|\/)Chart\.ya?ml$/i.test(p) ||                                   // helm chart
+    /(^|\/)kustomization\.ya?ml$/i.test(p) ||                           // kustomize
+    /(^|\/)(k8s|kubernetes|helm|charts?|deploy(ment)?|manifests?)\/.+\.(ya?ml|tpl)$/i.test(p)); // k8s/helm dirs
+  return { hasDockerfile, hasCompose, hasOrchestration };
+}
+
+/** Find cloud INFRA SDK deps (present evidence of cloud-native orientation) among names + raw manifest text. */
+export function detectCloudNativeSdks(names: string[], manifestText: string): string[] {
+  const hay = `${names.join(' ')} ${manifestText}`;
+  const hits = new Set<string>();
+  for (const { re, label } of CLOUD_NATIVE_DEP_PATTERNS) if (re.test(hay)) hits.add(label);
+  return [...hits];
+}
+
+/** Find billing/subscription SDK deps among names + raw manifest text. */
+export function detectBillingSdks(names: string[], manifestText: string): string[] {
+  const hay = `${names.join(' ')} ${manifestText}`;
+  const hits = new Set<string>();
+  for (const { re, label } of BILLING_DEP_PATTERNS) if (re.test(hay)) hits.add(label);
+  return [...hits];
+}
+
+/** WEAK multi-tenancy hints from tree paths — collected for evidence only, NEVER scored. */
+export function tenantHintsFromTree(paths: string[]): string[] {
+  return paths.filter((p) => /tenant|multi-?tenant/i.test(p)).slice(0, 5);
+}
+
 // ── The signals scout ──────────────────────────────────────────────────────────────────────────────────
 
 export class RepoScoutSignals {
@@ -249,6 +368,9 @@ export class RepoScoutSignals {
       architecture: { value: 'unknown', confidence: 'not-mechanizable', evidence: ev },
       airGap: { value: 'unknown', confidence: 'not-mechanizable', evidence: ev },
       whiteLabel: { value: 'unknown', confidence: 'not-mechanizable', evidence: ev },
+      cloudNative: { value: 'unknown', confidence: 'not-mechanizable', evidence: ev },
+      billingHooks: { value: 'unknown', confidence: 'not-mechanizable', evidence: ev },
+      multiTenancy: { value: 'unknown', confidence: 'not-mechanizable', evidence: ev },
       reason,
     };
   }
@@ -290,7 +412,15 @@ export class RepoScoutSignals {
     const airGap = deriveAirGap({ manifestReadable: !!manifest, cloudBlockers: blockers });
     const whiteLabel = deriveWhiteLabel({ brandingHits: treePaths ? brandingHitsFromTree(treePaths) : [] });
 
-    return { status: 'OK', target, maintainability, architecture, airGap, whiteLabel };
+    // Subscription-mode dimensions — derived from the SAME already-fetched tree + manifest (no extra network).
+    const cnTree = treePaths ? analyzeCloudNativeTree(treePaths) : { hasDockerfile: false, hasCompose: false, hasOrchestration: false };
+    const cloudSdks = manifest && parsed ? detectCloudNativeSdks(parsed.names, manifest.text) : [];
+    const billingSdks = manifest && parsed ? detectBillingSdks(parsed.names, manifest.text) : [];
+    const cloudNative = deriveCloudNative({ ...cnTree, cloudSdks });
+    const billingHooks = deriveBillingHooks({ billingSdks });
+    const multiTenancy = deriveMultiTenancy({ tenantHints: treePaths ? tenantHintsFromTree(treePaths) : [] });
+
+    return { status: 'OK', target, maintainability, architecture, airGap, whiteLabel, cloudNative, billingHooks, multiTenancy };
   }
 
   // ── network reads (all token-safe; raw host needs no token) ──────────────────────────────────────────

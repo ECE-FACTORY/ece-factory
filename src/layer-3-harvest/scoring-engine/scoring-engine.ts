@@ -76,16 +76,25 @@ export interface ScoreResult {
 /** Adapt a Repo Intelligence record's scoringInputs (+ supplied ratings) into a ScoringCandidate. */
 export function candidateFromScoringInputs(
   s: ScoringInputs,
-  extra: { archFit?: { rating: ArchFitRating; note?: string }; maintainability?: { rating: MaintainabilityRating; note?: string }; isSpine?: boolean; proposedVerdict?: Verdict } = {},
+  extra: {
+    archFit?: { rating: ArchFitRating; note?: string };
+    maintainability?: { rating: MaintainabilityRating; note?: string };
+    // Subscription dims the enrichment MAY fold from scout signals (override the record's deny-by-default).
+    cloudNative?: CloudNative;
+    billingHooks?: BillingHooks;
+    isSpine?: boolean;
+    proposedVerdict?: Verdict;
+  } = {},
 ): ScoringCandidate {
   return {
     license: { decision: s.licenseDecision, detected: s.licenseDetected },
     maturity: s.maturity ?? undefined,
     airGap: s.airGapSuitability,
     whiteLabel: s.whiteLabelFit,
-    multiTenancy: s.multiTenancy,   // subscription dims — ignored by scoreCandidate under 'sovereign'
-    billingHooks: s.billingHooks,
-    cloudNative: s.cloudNative,
+    // subscription dims — ignored by scoreCandidate under 'sovereign'. Enrichment overrides win over the record.
+    multiTenancy: s.multiTenancy,   // multi-tenancy is human-assessed only — never folded from the scout
+    billingHooks: extra.billingHooks ?? s.billingHooks,
+    cloudNative: extra.cloudNative ?? s.cloudNative,
     // arch-fit rating must be supplied (a freeform note alone is not a score); merge the record's note if absent.
     archFit: extra.archFit ? { rating: extra.archFit.rating, note: extra.archFit.note ?? s.architectureFitNotes ?? undefined } : undefined,
     maintainability: extra.maintainability,
@@ -292,5 +301,21 @@ export function foldAirGapMeasurement(score: ScoreResult, value: Exclude<AirGapS
   const band = bandFor(total, score.rejected);
   const flags = score.flags.filter((f) => !f.startsWith('air-gap ')); // drop the stale unmeasured air-gap flag
   if (measuredAirGap.score < 10) flags.push(`air-gap ${measuredAirGap.score}/20 (< 10) — human approval required (sovereign requirement)`);
+  return { subScores, total, rejected: score.rejected, band, flags, measuredCount, measuredWeightFraction };
+}
+
+/**
+ * SUBSCRIPTION analog of `foldAirGapMeasurement`. Fold a HUMAN-MEASURED multi-tenancy rating into an existing
+ * SUBSCRIPTION score WITHOUT re-grading any other dimension — the one subscription dimension the scout leaves
+ * deny-by-default (`not-mechanizable`). Only the `multi-tenancy` sub-score is replaced; the multi-tenancy<9 flag
+ * is recomputed; everything else is byte-for-byte. `value` excludes 'unknown' (a measurement is full/partial/none).
+ */
+export function foldMultiTenancyMeasurement(score: ScoreResult, value: Exclude<MultiTenancy, 'unknown'>): ScoreResult {
+  const measured = multiTenancySubScore(value);
+  const subScores = score.subScores.map((s) => (s.dimension === 'multi-tenancy' ? { ...measured } : { ...s }));
+  const { total, measuredCount, measuredWeightFraction } = normalizeMeasured(subScores);
+  const band = bandFor(total, score.rejected);
+  const flags = score.flags.filter((f) => !f.startsWith('multi-tenancy '));
+  if (measured.score < 9) flags.push(`multi-tenancy ${measured.score}/15 (< 9) — human approval required (subscription requirement)`);
   return { subScores, total, rejected: score.rejected, band, flags, measuredCount, measuredWeightFraction };
 }
