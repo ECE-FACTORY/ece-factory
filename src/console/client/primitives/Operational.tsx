@@ -63,6 +63,9 @@ export function Operational<T>({ field, label, render, mono = true }: Operationa
 
   const { value, provenance } = field;
   const glyph = SOURCE_GLYPH[provenance.source] ?? '·';
+  // Scalar values expose data-value so the trace test (0c.5) can assert value∈envelope.
+  // Custom renders (arrays/objects) omit it — their leaves trace via provenance source.
+  const scalarValue = render ? undefined : String(value);
   return (
     <span
       className={mono ? 'op op--mono' : 'op'}
@@ -70,6 +73,7 @@ export function Operational<T>({ field, label, render, mono = true }: Operationa
       data-field={label}
       data-prov-source={provenance.source}
       data-prov-pin={pinLabel(provenance.pin)}
+      data-value={scalarValue}
     >
       <span className="op__value">{render ? render(value) : String(value)}</span>
       <span className="op__stamp" title={`${provenance.source} · ${locatorText(provenance)} · read ${provenance.readAt}`}>

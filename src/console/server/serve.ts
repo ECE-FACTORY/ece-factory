@@ -4,13 +4,31 @@
 // approve, mint, or execute. (M4 is a static render — no SSE/watcher; that is M5+.)
 
 import { createServer } from 'node:http';
+import { execSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStateApi } from '../../read-plane/state-api/state-api.js';
 
-const api = createStateApi();
-const PORT = Number(process.env.CONSOLE_API_PORT ?? 4319);
+// A read-only vitest runner that tolerates a red suite. The read plane's default runner uses
+// execSync, which THROWS when vitest exits non-zero (our suite has the 12 known db-* failures) —
+// which would surface /state/tests as a 404 rather than an honest failing-suite report. vitest
+// still writes its JSON report to stdout on a non-zero exit, so we return that: the failures are
+// reported truthfully, never hidden. (Server-side only — the read plane is untouched; we just
+// supply the runner via its existing injectable dependency.)
+function tolerantVitestRunner(files: string[]): string {
+  const cmd = `npx vitest run --reporter=json ${files.join(' ')}`.trim();
+  try {
+    return execSync(cmd, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  } catch (e) {
+    const out = (e as { stdout?: string }).stdout;
+    if (out) return out;
+    throw e;
+  }
+}
+
+const api = createStateApi({ vitestRunner: tolerantVitestRunner });
+const PORT = Number(process.env.CONSOLE_API_PORT ?? 4318);
 const DIST = fileURLToPath(new URL('../dist/', import.meta.url)); // built client (prod); absent in dev
 
 const MIME: Record<string, string> = {

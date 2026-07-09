@@ -5,6 +5,7 @@
 // decoration.
 
 import React from 'react';
+import './shell.css';
 
 const LAYERS = ['L1 · LAW', 'L2 · COMMAND', 'L3 · HARVEST', 'L4 · BUILD', 'L5 · ACTION', 'L6 · INTEL'];
 

@@ -1,0 +1,181 @@
+.cc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6);
+}
+.cc__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+  color: var(--text);
+}
+
+/* Discrepancy banner — loud, red. */
+.banner--discrepancy {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  border: 1px solid var(--status-violation);
+  background: color-mix(in srgb, var(--status-violation) 12%, var(--graphite));
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.banner__tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--status-violation);
+}
+.banner__list {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text);
+}
+
+/* Factory-flow hero. */
+.cc__flow {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  border: var(--hairline);
+  border-radius: var(--radius);
+  background: var(--graphite);
+  padding: var(--space-4);
+}
+.flow__stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 120px;
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--graphite-raised);
+  border: var(--hairline);
+  border-radius: var(--radius);
+}
+.flow__name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--status-active);
+}
+.flow__stage--locked .flow__name {
+  color: var(--text-faint);
+}
+.flow__unit {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.flow__locked {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+.flow__gate {
+  align-self: center;
+  color: var(--status-authority);
+  font-size: 14px;
+}
+
+/* Panels grid. */
+.cc__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+.panel {
+  border: var(--hairline);
+  border-radius: var(--radius);
+  background: var(--graphite);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.panel--wide {
+  grid-column: 1 / -1;
+}
+.panel__title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--hairline);
+}
+.panel__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.panel__row--wrap {
+  flex-wrap: wrap;
+}
+.panel__label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* Law chips. */
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px var(--space-2);
+  border-radius: 2px;
+  border: 1px solid var(--edge-strong);
+  color: var(--text-dim);
+}
+.chip--pass {
+  color: var(--status-verified);
+  border-color: color-mix(in srgb, var(--status-verified) 50%, var(--edge));
+}
+.chip--fail {
+  color: var(--status-violation);
+  border-color: var(--status-violation);
+}
+
+/* Milestones. */
+.milestones {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.milestone {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+.milestone__sha {
+  font-family: var(--font-mono);
+  color: var(--status-active);
+}
+.milestone__subject {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.milestone__author {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.op--loading .op__value {
+  color: var(--text-faint);
+}

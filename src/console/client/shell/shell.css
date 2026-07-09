@@ -1,0 +1,103 @@
+/* Three-zone shell: topbar over [ rail | workspace | inspector ]. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.shell__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--hairline);
+  background: var(--graphite);
+}
+.shell__brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 13px;
+  color: var(--text);
+}
+.shell__mode {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.shell__body {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr) 300px;
+  flex: 1;
+  min-height: 0;
+}
+.shell__rail {
+  border-right: var(--hairline);
+  background: var(--graphite);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  overflow: auto;
+}
+.rail__layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rail__layer {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.rail__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border-top: var(--hairline);
+  padding-top: var(--space-4);
+}
+.rail__page {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: var(--space-1) 0;
+}
+.rail__page--active {
+  color: var(--status-active);
+}
+.rail__page--locked {
+  color: var(--text-faint);
+}
+.shell__workspace {
+  overflow: auto;
+  min-width: 0;
+}
+.workspace__placeholder {
+  color: var(--text-faint);
+  padding: var(--space-6);
+}
+.shell__inspector {
+  border-left: var(--hairline);
+  background: var(--graphite);
+  padding: var(--space-4);
+  overflow: auto;
+}
+.inspector__empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 960px) {
+  .shell__body {
+    grid-template-columns: 1fr;
+  }
+  .shell__rail,
+  .shell__inspector {
+    display: none;
+  }
+}

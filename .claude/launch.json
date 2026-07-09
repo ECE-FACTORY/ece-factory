@@ -12,6 +12,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["src/mcp-server/run-cockpit.mjs"],
       "port": 4400
+    },
+    {
+      "name": "console",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "console:serve"],
+      "port": 4318
     }
   ]
 }
