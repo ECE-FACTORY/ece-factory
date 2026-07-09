@@ -540,6 +540,76 @@ describe('Layer 1 — "Write Asks Read First" doctrine (STATIC prohibitions)', (
     }
   });
 
+  // ── Prohibition 4l (added additively) — the factory CANNOT ACT WITHOUT REMEMBERING it acted ────────────
+  // Every CONSUMED approval must have a persisted approval `consume` record AND an audit event pinned to the same
+  // approvalId. An unrecorded consumption is a law failure. AND recording must never affect gating: a persistence
+  // failure leaves the gate outcome unchanged (the seam STILL returns its ApprovedBuildDecision) and records the
+  // failure. This is ADDITIVE and does NOT weaken 4i/4k — the seam files are UNEDITED (persistence attaches via
+  // wrappers + injected total sinks, never inside the seams), so their construction-site freezes stay intact.
+  it('Prohibition 4l — a consumed approval is persisted (approval consume + audit), and a persistence failure never changes the gate outcome', async () => {
+    // SOURCE CLAUSE: the seam files import NO persistence writer and hold no store/append call (persistence lives
+    // only in the wrappers/composition — the seams stay byte-identical, 4i/4k unaffected).
+    for (const name of ['build-decision-seam', 'subscription-decision-seam']) {
+      const seamSrc = stripComments(readFileSync(join(SRC, 'layer-2-command', name, `${name}.ts`), 'utf8'));
+      expect(/factory-persistence/.test(seamSrc)).toBe(false);
+      expect(/\bappendFile/.test(seamSrc)).toBe(false);
+      expect(/from\s*['"][^'"]*\/store\.js['"]/.test(seamSrc)).toBe(false);
+    }
+
+    // Runtime pieces via dynamic import (so this file loads even before the instrumentation exists). Dynamic
+    // factory modules are typed `any` here — a pragmatic, contained choice for a behavioral law fixture.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dyn = (p: string): Promise<any> => import(p);
+    const os = await import('node:os'); const fs = await import('node:fs'); const nodePath = await import('node:path');
+    const { mkdtempSync, rmSync } = fs; const root = mkdtempSync(nodePath.join(os.tmpdir(), 'ece-4l-'));
+    try {
+      const { ApprovalGate } = await dyn('../layer-1-law/approval-gate/approval-gate.js');
+      const { DecisionConsole } = await dyn('../layer-2-command/decision-console/decision-console.js');
+      const { BuildDecisionSeam } = await dyn('../layer-2-command/build-decision-seam/build-decision-seam.js');
+      const { scoreCandidate } = await dyn('../layer-3-harvest/scoring-engine/scoring-engine.js');
+      const { makeEmitters } = await dyn('../factory-persistence/instrument.js');
+      const { verifyChain } = await dyn('../factory-persistence/verify.js');
+      const { storeFilePath } = await dyn('../factory-persistence/store.js');
+
+      // A FORK-eligible-modulo-air-gap sovereign spine (measured license+maturity+arch+maint; air-gap UNMEASURED).
+      const score = scoreCandidate({ license: { decision: 'ACCEPT', detected: 'MIT' }, maturity: { stars: 2000, activelyMaintained: true }, archFit: { rating: 'strong' }, maintainability: { rating: 'clean' } }, 'sovereign');
+      const id = { host: 'github.com', owner: 'acme', name: 'engine' };
+      const spine = { repoUrl: 'https://github.com/acme/engine', identity: id, record: { evaluatedAtIso: 'i', identity: id, licenseDetected: 'MIT', licenseDecision: 'ACCEPT', eligibility: 'eligible', provenanceVerified: true, maturity: { stars: 2000, activelyMaintained: true }, airGapSuitability: 'unknown', whiteLabelFit: 'unknown', architectureFitNotes: null, priorVerdict: null, readme: null, description: null, status: 'recorded' }, score, licenseOneLine: 'MIT', licenseVerified: true, licenseDisagreement: false, rawLicenseText: 'MIT', notes: [], enrichment: { applied: false, status: 'NONE', totalBefore: score.total, totalAfter: score.total, bandBefore: score.band, bandAfter: score.band, dimensions: [] } };
+      const report = { domain: 'D', productMode: 'sovereign', generatedAtIso: 'i', subDomains: [{ subDomain: { key: 'k', title: 'K', query: 'q' }, candidates: [spine], spine, decision: 'EXTEND', decisionEvidence: [] }], sovereign: {}, reviewer: [], redTeam: [], moat: [], marketPosition: [], limitations: [], status: 'STOP-AWAITING-HUMAN-APPROVAL' };
+      const HUMAN = { user_id: 'bitez', role: 'admin' };
+
+      const run = async (writer?: (name: string, payload: unknown) => void) => {
+        const emitters = makeEmitters({ root, writer });
+        const gate = new ApprovalGate({ audit: emitters.approvalsSink }); // gate lifecycle → approvals sink (composition)
+        const console = new DecisionConsole(gate, emitters.consoleSink);
+        const seam = new BuildDecisionSeam({ gate, console, proposingCaller: 'orchestrator-agent' });
+        const prep = seam.prepare({ report, subDomainKey: 'k', airGap: { value: 'yes', rationale: 'r' } });
+        console.approve(prep.prepared.actionId, HUMAN, 'approve');
+        const outcome = await emitters.instrumentAssemble((p: unknown) => seam.assemble(p))(prep.prepared);
+        return { outcome: outcome as { status: string; approved?: { approval: { approvalId: string } } }, emitters, gate };
+      };
+
+      // (a) BEHAVIORAL — a real consume persists an approval consume record + an audit event; chains verify.
+      const good = await run();
+      expect(good.outcome.status).toBe('APPROVED-BUILD-DECISION');
+      const approvalId = good.outcome.approved!.approval.approvalId;
+      const approvals = fs.readFileSync(storeFilePath('approvals', root) as string, 'utf8');
+      const audit = fs.readFileSync(storeFilePath('audit', root) as string, 'utf8');
+      expect(approvals).toMatch(new RegExp(`"event":"consumed"[^\\n]*${approvalId}`));
+      expect(audit).toMatch(/decision-assembled/);
+      expect((verifyChain as (p: string) => { ok: boolean })(storeFilePath('approvals', root) as string).ok).toBe(true);
+      expect((verifyChain as (p: string) => { ok: boolean })(storeFilePath('audit', root) as string).ok).toBe(true);
+      expect(good.emitters.failures().length).toBe(0);
+
+      // (b) FAILURE-ISOLATION — a failing writer NEVER changes the gate outcome; the failure itself is recorded.
+      const bad = await run(() => { throw new Error('disk full'); });
+      expect(bad.outcome.status).toBe('APPROVED-BUILD-DECISION'); // the seam STILL returns the decision
+      expect(bad.emitters.failures().length).toBeGreaterThan(0);  // the factory noticed it couldn't remember
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // ── RUNTIME prohibitions — DOCUMENTED, NOT STATICALLY ASSERTED ────────────────────────────────────────
   // Prohibitions 5 (audit), 6 (human attribution), and 7 (no write on missing/stale/ambiguous/unverified
   // evidence) are properties of the EXECUTION path, not of the source graph, so they cannot be honestly proven
