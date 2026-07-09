@@ -1,0 +1,13 @@
+/* Type roles (design §5.2): Archivo Expanded (display/authority) · IBM Plex Sans (body) ·
+   IBM Plex Mono (machine values). Faces are OFL and will be BUNDLED locally as .woff2 in the
+   polish step — NO external font URL is ever fetched (sovereignty). Until the .woff2 files
+   land, the families fall back to the platform stack, so nothing here reaches the network. */
+:root {
+  --font-display: 'Archivo Expanded', 'Archivo', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
+}
+
+/* @font-face blocks (local src only) are added with the bundled .woff2 in the polish step:
+   @font-face { font-family: 'IBM Plex Mono'; src: url('./fonts/IBMPlexMono-Regular.woff2') format('woff2'); }
+   No url() points off-machine. */

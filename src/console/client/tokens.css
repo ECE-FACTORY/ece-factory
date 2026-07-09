@@ -1,0 +1,87 @@
+/* Design tokens (design §5.1). Semantic — components reference these vars, never raw hex,
+   so a status color cannot be hand-picked. Near-black / graphite base + coded accents. */
+:root {
+  /* base */
+  --ink: #0a0c10;
+  --graphite: #12161c;
+  --graphite-raised: #191f27;
+  --edge: #262e38;
+  --edge-strong: #38424e;
+
+  /* text ramp */
+  --text: #e7ecf2;
+  --text-dim: #93a0af;
+  --text-faint: #5c6875;
+
+  /* coded semantic accents (each color MEANS something) */
+  --status-active: #35d6c4;    /* cyan  — live · selected · link · connected */
+  --status-authority: #d9a94c; /* gold  — gates · human-required · authority */
+  --status-violation: #ef5350; /* red   — violation · discrepancy · absent-when-expected */
+  --status-review: #e08a2b;    /* amber — pending · under review */
+  --status-verified: #45c98a;  /* green — passed · verified · present-truth */
+
+  /* spacing / geometry */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius: 4px;
+  --hairline: 1px solid var(--edge);
+
+  --motion-fast: 180ms;
+  --motion-calm: 220ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-calm: 0ms;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* <Operational> leaf — value + provenance stamp. The stamp is the signature motif. */
+.op {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.op--mono .op__value {
+  font-family: var(--font-mono);
+}
+.op__value {
+  color: var(--text);
+}
+.op__stamp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--status-active);
+  cursor: default;
+}
+.op--unavailable .op__value {
+  color: var(--status-violation);
+}
+.op__stamp--absent {
+  color: var(--status-violation);
+  border-bottom-color: transparent;
+}

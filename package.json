@@ -9,6 +9,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "console:typecheck": "tsc --noEmit -p src/console/tsconfig.json",
+    "console:api": "tsx src/console/server/serve.ts",
+    "console:dev": "vite --config src/console/vite.config.ts",
+    "console:build": "vite build --config src/console/vite.config.ts",
+    "console:serve": "tsx src/console/server/serve.ts",
     "lint": "eslint .",
     "test": "vitest run",
     "mcp:server": "node src/mcp-server/run.mjs",
@@ -16,15 +21,25 @@
   },
   "license": "SEE LICENSE — governed by organization-source-of-truth",
   "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
     "@types/node": "26.0.1",
     "@types/pg": "8.20.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "4.7.0",
     "eslint": "10.6.0",
+    "jsdom": "25.0.1",
     "pg": "8.22.0",
+    "tsx": "4.23.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.62.0",
+    "vite": "6.4.3",
     "vitest": "4.1.9"
   },
   "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "zod": "4.4.3"
   }
 }
