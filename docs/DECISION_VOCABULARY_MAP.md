@@ -52,6 +52,12 @@ governance still applies to it. This page is that map. Every claim cites a commi
 - **Governance is unchanged by vocabulary.** All Wave-era gates (harvest-before-build, human approval,
   instruction boundary, append-only audit) apply identically to M-track work.
 
+## Process rule (added at step 7.1v)
+
+- Every Step Evidence Pack must include the **`origin/main` sha after push**; a step is **not reviewable
+  until its commits are on the remote** (the uncorrelated reviewer re-derives from origin, not from a
+  local tree).
+
 ---
 
 *DRAFT — PENDING HUMAN APPROVAL. Do not cite this map as authority until the approval row exists.*
