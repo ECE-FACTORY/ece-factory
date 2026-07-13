@@ -14,14 +14,20 @@ This project is governed by the full ECE Factory governance stack in the **`orga
 Project name:        ECE Factory (main application)
 Project repo:        github.com/ECE-FACTORY/ece-factory
 Governs via:         organization-source-of-truth (Layers 0, 1, 1.1, 2, Action-Layer A)
-Stack:               TypeScript-first — Next.js/React frontend, Node/TypeScript backend + API,
-                     shared TypeScript schemas, PostgreSQL. ORM (Prisma or Drizzle) selected in Phase 2.
-Current phase:       Phase 0 — awaiting Module 23 harvest
-MCP write tools:     DISABLED (read-only; search_clients only in Phase 1, in the ece-mcp-bridge repo)
+Stack:               TypeScript-first (ESM, Node ≥20) — React 19 + Vite console (src/console),
+                     Node/TypeScript engines, zod contracts, PostgreSQL via raw SQL migrations
+                     (infra/migrations) + pg driver. No ORM adopted.
+Current phase:       Build track — Waves 1–6 built and committed (wave-boundary sign-offs live in the
+                     org repo review log); M-track (UI masterbuild Tier-0) in progress, M4 as of 5d347d2.
+MCP write tools:     TIERED, per tier-status (src/mcp-server/tier-status.ts): read-only LIVE ·
+                     internal-write LIVE (append-only, token-gated) · draft-only FAKE · external
+                     FAKES-BY-DEFAULT (GitHub actions live only via explicit ECE_GITHUB_LIVE=1 opt-in;
+                     other external actions fake) · forbidden registered-and-refused. Bridge lives
+                     in THIS repo (src/layer-5-action/mcp-bridge + src/mcp-server), not ece-mcp-bridge.
 Review log:          review/AUTOPILOT_REVIEW_LOG.md (org repo)
 ```
 
-This repo holds the factory's engines (Wave 1 ROOTs first: Audit, Redaction, Tool Registry, Permission, Kill Switch, Evidence Pack, License & Compliance) and the Command Center / registries dashboard. The first build target is **Module 23 — Audit Engine** (`src/features/audit-engine/`), and no engine code is written before its Harvest Report is approved.
+This repo holds the factory's engines (Wave 1 ROOTs first: Audit, Redaction, Tool Registry, Permission, Kill Switch, Evidence Pack, License & Compliance) and the Command Center / registries dashboard. The first build target was **Module 23 — Audit Engine** (now at `src/factory-shared/audit-engine/`; the pre-restructure `src/features/` path no longer exists), and no engine code is written before its Harvest Report is approved.
 
 ---
 
