@@ -23,17 +23,23 @@ governance still applies to it. This page is that map. Every claim cites a commi
 | Period | Track | Evidence |
 |---|---|---|
 | 2026-06-29 → 2026-07-02 | **Waves 1–6** — engines, action layer, policy engine, console v1 | `docs/WAVE_1..5_COMPLETION_REPORT.md`; Wave 6 Pieces 1–4 commits `8f8760a`, `d84c178`, `1fa282e`, `82e4932`, `3143de9` (last: 2026-07-02 22:46 +0400) |
-| **Completion baseline** | Wave-numbered work ends at Wave 6 Piece 4 (`3143de9`). This is the boundary referred to as the **2026-07-03 completion baseline** (the org-repo snapshot of that state is dated 2026-07-03). | `git show 3143de9 --no-patch` |
+| **Completion baseline** | Wave-numbered work ends at Wave 6 Piece 4 (`3143de9`, 2026-07-02). The **2026-07-03 completion baseline** is the org repo's `registry/FACTORY_COMPLETION_PLAN.md` — "Completion Plan & Status Baseline", recorded 2026-07-03 (human: Rashed) from the read-only audit of 2026-07-02/03. | org repo `registry/FACTORY_COMPLETION_PLAN.md` at HEAD `c9b84d0` |
 | 2026-07-04 → 2026-07-06 | **Post-baseline factory infrastructure** — factory capabilities #1–5, VI wave (Phases 1–4 + Judgment Engines 1–4) | commits `8896ebe` … `c499000`, `9ca2da0`, `23a0fb9` … `47c17b6` |
 | 2026-07-06 → 2026-07-09 | Product-mode switch + promotion seams | `115fc86`, `5c8cc53`, `834a7b6`, `4d91d85` |
 | 2026-07-09 → now | **M-track** — UI masterbuild Tier-0 | plan `f76e639`; M2 `ec53843`/`94b3506`/`273a0d3`; M3 `05e14ec`/`b36164f`/`be873e8`/`c4e7cb5`/`ea2deb9`; M4 `af649ee`/`65274e0`/`5d347d2` (HEAD) |
 
 ## The map
 
-- **Waves 0–6** are the *module-construction* vocabulary. That sequence has been **built and committed**
-  (per the in-repo completion reports and commit history above). Wave-boundary **human sign-offs are a
-  separate artifact** recorded in the org repo's `review/AUTOPILOT_REVIEW_LOG.md` — this map does not
-  assert their status.
+- **Waves 0–6** are the *module-construction* vocabulary. That sequence is **built, committed, and
+  signed off by the human**, per the org repo's `review/AUTOPILOT_REVIEW_LOG.md` (verified at HEAD
+  `c9b84d0`, 93 dated rows, 2026-06-29 → 2026-07-03): Wave 1–4 completion gates **STOP → SIGNED OFF**
+  (2026-06-29); Wave 5 close-out **SIGNED OFF / PASS by human (Rashed, 2026-06-30)**, authorizing
+  Wave 6; Wave 6 pieces **PASS** (2026-07-02); Operator Cockpit UI **PASS by human (Rashed,
+  2026-07-03)**. The completion baseline is `registry/FACTORY_COMPLETION_PLAN.md` (2026-07-03).
+- **Canonical governance source:** the GitHub remote `ECE-FACTORY/organization-source-of-truth`
+  (live local clone: `~/Desktop/ECE FACTORY`). The unversioned `~/Downloads` snapshots are
+  **non-authoritative** — a 7.0 finding ("review log empty") came from reading a stale snapshot and
+  is corrected by this amendment. Do not read snapshots as the law.
 - **The M-track is not a Wave.** It is **factory infrastructure work continuing after the completion
   baseline**: instrumenting and operating the already-built factory (typed read plane, append-only
   hash-chained persistence, honest operator console). It jumps no gates — each M-milestone shipped
